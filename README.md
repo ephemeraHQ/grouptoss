@@ -1,13 +1,14 @@
 # Group Toss Agent
 
-A coin toss agent built using CDP AgentKit that operates over the XMTP messaging protocol, enabling group coin toss on custom topics.
+A coin toss agent built using CDP AgentKit that operates over the XMTP messaging
+protocol, enabling group coin toss on custom topics.
 
 ![](./screenshot.png)
 
 ## Getting started
 
-> [!TIP]
-> See XMTP's [cursor rules](/.cursor/README.md) for vibe coding agents and best practices.
+> [!TIP] See XMTP's [cursor rules](/.cursor/README.md) for vibe coding agents
+> and best practices.
 
 ### Requirements
 
@@ -15,12 +16,14 @@ A coin toss agent built using CDP AgentKit that operates over the XMTP messaging
 - Yarn v4 or higher
 - Docker (optional, for local network)
 - [OpenAI](https://platform.openai.com/api-keys) API key
-- [Coinbase Developer Platform](https://portal.cdp.coinbase.com) (CDP) API credentials
+- [Coinbase Developer Platform](https://portal.cdp.coinbase.com) (CDP) API
+  credentials
 - [USDC Faucet](https://faucet.circle.com/)
 
 ### Environment variables
 
-To run your XMTP agent, you must create a `.env` file with the following variables:
+To run your XMTP agent, you must create a `.env` file with the following
+variables:
 
 ```bash
 WALLET_KEY= # the private key for the wallet
@@ -40,17 +43,16 @@ You can generate random xmtp keys with the following command:
 yarn gen:keys
 ```
 
-> [!WARNING]
-> Running the `gen:keys` command will append keys to your existing `.env` file.
+> [!WARNING] Running the `gen:keys` command will append keys to your existing
+> `.env` file.
 
 ### Run the agent
 
 ```bash
 # git clone repo
-git clone https://github.com/ephemeraHQ/xmtp-agent-examples.git
+git clone https://github.com/ephemeraHQ/xmtp-group-toss.git
 # go to the folder
-cd xmtp-agent-examples
-cd examples/xmtp-group-toss
+cd xmtp-group-toss
 # install packages
 yarn
 # generate random xmtp keys (optional)
@@ -67,7 +69,8 @@ The agent responds to commands in group chats when tagged with `@toss`:
 
 - `@toss <natural language toss>` - Create a toss using natural language
 - `@toss join <tossId> <option>` - Join a toss and select your option
-- `@toss close <tossId> <option>` - Close the toss and set the winning option (creator only)
+- `@toss close <tossId> <option>` - Close the toss and set the winning option
+  (creator only)
 - `@toss status <tossId>` - Check toss status and participants
 - `@toss list` - List all active tosses
 - `@toss balance` - Check your wallet balance
@@ -75,7 +78,8 @@ The agent responds to commands in group chats when tagged with `@toss`:
 ### Natural Language Examples
 
 - `@toss Will it rain tomorrow for 5` - Creates a yes/no toss with 5 USDC
-- `@toss Lakers vs Celtics game for .1` - Creates a toss with Lakers and Celtics as options
+- `@toss Lakers vs Celtics game for .1` - Creates a toss with Lakers and Celtics
+  as options
 
 ## FAQ
 
@@ -85,7 +89,8 @@ The agent responds to commands in group chats when tagged with `@toss`:
 2. **Join the toss**: `@toss join 1 yes` (other players must choose an option)
 3. **Check status**: `@toss status 1`
 4. **Close the toss**: `@toss close 1 yes` (creator decides the winning option)
-5. **View results**: All players who chose the winning option share the prize pool
+5. **View results**: All players who chose the winning option share the prize
+   pool
 
 ### The agent workflow:
 
