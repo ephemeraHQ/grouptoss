@@ -125,6 +125,38 @@ export async function initializeXmtpClient() {
   return client;
 }
 
+export const createUser = (key: string): User => {
+  const account = privateKeyToAccount(key as `0x${string}`);
+  return {
+    key: key as `0x${string}`,
+    account,
+    wallet: createWalletClient({
+      account,
+      chain: sepolia,
+      transport: http(),
+    }),
+  };
+};
+
+export const createSigner = (key: string): Signer => {
+  const sanitizedKey = key.startsWith("0x") ? key : `0x${key}`;
+  const user = createUser(sanitizedKey);
+  return {
+    type: "EOA",
+    getIdentifier: () => ({
+      identifierKind: IdentifierKind.Ethereum,
+      identifier: user.account.address.toLowerCase(),
+    }),
+    signMessage: async (message: string) => {
+      const signature = await user.wallet.signMessage({
+        message,
+        account: user.account,
+      });
+      return toBytes(signature);
+    },
+  };
+};
+
 // Interface for parsed JSON response
 export interface TossJsonResponse {
   topic?: string;
@@ -158,38 +190,6 @@ interface User {
   account: ReturnType<typeof privateKeyToAccount>;
   wallet: ReturnType<typeof createWalletClient>;
 }
-
-export const createUser = (key: string): User => {
-  const account = privateKeyToAccount(key as `0x${string}`);
-  return {
-    key: key as `0x${string}`,
-    account,
-    wallet: createWalletClient({
-      account,
-      chain: sepolia,
-      transport: http(),
-    }),
-  };
-};
-
-export const createSigner = (key: string): Signer => {
-  const sanitizedKey = key.startsWith("0x") ? key : `0x${key}`;
-  const user = createUser(sanitizedKey);
-  return {
-    type: "EOA",
-    getIdentifier: () => ({
-      identifierKind: IdentifierKind.Ethereum,
-      identifier: user.account.address.toLowerCase(),
-    }),
-    signMessage: async (message: string) => {
-      const signature = await user.wallet.signMessage({
-        message,
-        account: user.account,
-      });
-      return toBytes(signature);
-    },
-  };
-};
 
 /**
  * Generate a random encryption key
@@ -289,8 +289,6 @@ export function createUSDCTransferCalls(
     ],
   };
 }
-import "dotenv/config";
-
 export const logAgentDetails = (
   address: string,
   inboxId: string,
@@ -310,7 +308,7 @@ export const logAgentDetails = (
      ╚███╔╝ ██╔████╔██║   ██║   ██████╔╝
      ██╔██╗ ██║╚██╔╝██║   ██║   ██╔═══╝ 
     ██╔╝ ██╗██║ ╚═╝ ██║   ██║   ██║     
-    ╚═╝  ╚═╝╚═╝     ╚═╝   ╚═╝   ╚═╝     
+    ╚═╝  ╚═╝╚═╝     ╚═╝   ╚═╝   ╚═╝     a
   \x1b[0m`);
 
   const url = `http://xmtp.chat/dm/${address}?env=${env}`;

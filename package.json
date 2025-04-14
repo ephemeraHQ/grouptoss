@@ -1,12 +1,13 @@
 {
-  "name": "@examples/xmtp-group-toss",
+  "name": "xmtp-group-toss",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "tsx src/index.ts",
-    "dev": "tsx --watch src/index.ts"
+    "dev": "tsx --watch src/index.ts",
+    "gen:keys": "tsx scripts/generateKeys.ts"
   },
   "dependencies": {
     "@coinbase/agentkit": "^0.6.2",
@@ -18,7 +19,7 @@
     "@xmtp/content-type-wallet-send-calls": "^1.0.0",
     "@xmtp/node-sdk": "1.2.0",
     "dotenv": "^16.4.7",
-    "redis": "^4.7.0",
+    "rimraf": "^6.0.1",
     "uint8arrays": "^5.1.0",
     "viem": "^2.7.15"
   },

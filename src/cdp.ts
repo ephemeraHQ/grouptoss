@@ -5,6 +5,7 @@ import {
   erc20ActionProvider,
   walletActionProvider,
 } from "@coinbase/agentkit";
+import "dotenv/config";
 import { getLangChainTools } from "@coinbase/agentkit-langchain";
 import {
   Coinbase,
