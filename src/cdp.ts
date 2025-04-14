@@ -14,7 +14,7 @@ import {
   type Trade,
   type WalletData,
 } from "@coinbase/coinbase-sdk";
-import { validateEnvironment } from "@helpers/utils";
+import { validateEnvironment } from "./helper";
 import { MemorySaver } from "@langchain/langgraph";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
@@ -179,7 +179,7 @@ export class WalletService {
           walletData: walletInfo.walletData,
           agent_address: walletInfo.agent_address,
           inboxId: walletInfo.inboxId,
-        }),
+        })
       );
       console.log("Wallet created and saved successfully");
       return walletInfo;
@@ -224,7 +224,7 @@ export class WalletService {
       // Look for toss games with this wallet address
       const tosses = await storage.listActiveTosses();
       const matchingToss = tosses.find(
-        (toss) => toss.walletAddress.toLowerCase() === address.toLowerCase(),
+        (toss) => toss.walletAddress.toLowerCase() === address.toLowerCase()
       );
 
       if (matchingToss) {
@@ -243,7 +243,7 @@ export class WalletService {
   async transfer(
     inboxId: string,
     toAddress: string,
-    amount: number,
+    amount: number
   ): Promise<CoinbaseTransfer | undefined> {
     toAddress = toAddress.toLowerCase();
 
@@ -268,14 +268,16 @@ export class WalletService {
 
     // Check balance
     console.log(
-      `💰 Checking balance for source wallet: ${from.agent_address}...`,
+      `💰 Checking balance for source wallet: ${from.agent_address}...`
     );
     const balance = await from.wallet?.getBalance(Coinbase.assets.Usdc);
     console.log(`💵 Available balance: ${Number(balance)} USDC`);
 
     if (Number(balance) < amount) {
       console.error(
-        `❌ Insufficient balance. Required: ${amount} USDC, Available: ${Number(balance)} USDC`,
+        `❌ Insufficient balance. Required: ${amount} USDC, Available: ${Number(
+          balance
+        )} USDC`
       );
       return undefined;
     }
@@ -307,7 +309,7 @@ export class WalletService {
 
     try {
       console.log(
-        `🚀 Executing transfer of ${amount} USDC from ${from.agent_address} to ${destinationAddress}...`,
+        `🚀 Executing transfer of ${amount} USDC from ${from.agent_address} to ${destinationAddress}...`
       );
       const transfer = await from.wallet?.createTransfer({
         amount,
@@ -323,13 +325,13 @@ export class WalletService {
       } catch (err) {
         if (err instanceof TimeoutError) {
           console.log(
-            `⚠️ Waiting for transfer timed out, but transaction may still complete`,
+            `⚠️ Waiting for transfer timed out, but transaction may still complete`
           );
         } else {
           const errorMessage = err instanceof Error ? err.message : String(err);
           console.error(
             `❌ Error while waiting for transfer to complete:`,
-            errorMessage,
+            errorMessage
           );
         }
       }
@@ -344,7 +346,7 @@ export class WalletService {
   }
 
   async checkBalance(
-    inboxId: string,
+    inboxId: string
   ): Promise<{ address: string | undefined; balance: number }> {
     // First check if this is an address that belongs to a toss wallet
     const tossId = await this.getTossIdFromAddress(inboxId);
@@ -354,7 +356,7 @@ export class WalletService {
       const tossWallet = await this.getWallet(tossId);
       if (tossWallet) {
         const balance = await tossWallet.wallet?.getBalance(
-          Coinbase.assets.Usdc,
+          Coinbase.assets.Usdc
         );
         return {
           address: tossWallet.agent_address,
@@ -381,7 +383,7 @@ export class WalletService {
     address: string,
     fromAssetId: string,
     toAssetId: string,
-    amount: number,
+    amount: number
   ): Promise<Trade | undefined> {
     address = address.toLowerCase();
 

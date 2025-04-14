@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "fs";
 import * as fs from "fs/promises";
 import path from "path";
-import { validateEnvironment } from "@helpers/utils";
+import { validateEnvironment } from "./helper";
 import type { AgentWalletData } from "./cdp";
 import { TossStatus, type GroupTossName } from "./helper";
 
@@ -44,7 +44,7 @@ class StorageService {
   private async saveToFile(
     directory: string,
     identifier: string,
-    data: string,
+    data: string
   ): Promise<boolean> {
     const toRead = `${identifier}-${NETWORK_ID}`;
     try {
@@ -62,7 +62,7 @@ class StorageService {
    */
   private async readFromFile<T>(
     directory: string,
-    identifier: string,
+    identifier: string
   ): Promise<T | null> {
     try {
       const key = `${identifier}-${NETWORK_ID}`;

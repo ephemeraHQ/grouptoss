@@ -98,7 +98,7 @@ export class TossManager {
   }
 
   async getBalance(
-    inboxId: string,
+    inboxId: string
   ): Promise<{ address: string | undefined; balance: number }> {
     try {
       const balance = await this.walletService.checkBalance(inboxId);
@@ -121,10 +121,10 @@ export class TossManager {
 
   async createGame(
     creator: string,
-    tossAmount: string,
+    tossAmount: string
   ): Promise<GroupTossName> {
     console.log(
-      `🎮 CREATING NEW TOSS (Creator: ${creator}, Amount: ${tossAmount} USDC)`,
+      `🎮 CREATING NEW TOSS (Creator: ${creator}, Amount: ${tossAmount} USDC)`
     );
 
     // Get the next toss ID
@@ -150,7 +150,7 @@ export class TossManager {
 
     await storage.saveToss(toss);
     console.log(
-      `🎮 Toss ${tossId} created successfully with wallet ${tossWallet.agent_address}`,
+      `🎮 Toss ${tossId} created successfully with wallet ${tossWallet.agent_address}`
     );
 
     return toss;
@@ -160,7 +160,7 @@ export class TossManager {
     tossId: string,
     player: string,
     chosenOption: string,
-    hasPaid: boolean,
+    hasPaid: boolean
   ): Promise<GroupTossName> {
     const toss = await storage.getToss(tossId);
     if (!toss) {
@@ -186,12 +186,14 @@ export class TossManager {
     if (toss.tossOptions?.length) {
       const normalizedOption = chosenOption.toLowerCase();
       const normalizedAvailableOptions = toss.tossOptions.map((opt: string) =>
-        opt.toLowerCase(),
+        opt.toLowerCase()
       );
 
       if (!normalizedAvailableOptions.includes(normalizedOption)) {
         throw new Error(
-          `Invalid option: ${chosenOption}. Available options: ${toss.tossOptions.join(", ")}`,
+          `Invalid option: ${chosenOption}. Available options: ${toss.tossOptions.join(
+            ", "
+          )}`
         );
       }
     }
@@ -232,10 +234,10 @@ export class TossManager {
     inboxId: string,
     tossId: string,
     amount: string,
-    chosenOption: string,
+    chosenOption: string
   ): Promise<boolean> {
     console.log(
-      `💸 Processing payment: User ${inboxId}, Toss ${tossId}, Amount ${amount}, Option ${chosenOption}`,
+      `💸 Processing payment: User ${inboxId}, Toss ${tossId}, Amount ${amount}, Option ${chosenOption}`
     );
 
     try {
@@ -249,7 +251,7 @@ export class TossManager {
       const transfer = await this.walletService.transfer(
         inboxId,
         toss.walletAddress,
-        parseFloat(amount),
+        parseFloat(amount)
       );
 
       return !!transfer;
@@ -261,10 +263,10 @@ export class TossManager {
 
   async executeCoinToss(
     tossId: string,
-    winningOption: string,
+    winningOption: string
   ): Promise<GroupTossName> {
     console.log(
-      `🎲 Executing toss: ${tossId}, winning option: ${winningOption}`,
+      `🎲 Executing toss: ${tossId}, winning option: ${winningOption}`
     );
 
     const toss = await storage.getToss(tossId);
@@ -300,7 +302,7 @@ export class TossManager {
 
     // Validate winning option
     const matchingOption = options.find(
-      (option) => option.toLowerCase() === winningOption.toLowerCase(),
+      (option) => option.toLowerCase() === winningOption.toLowerCase()
     );
 
     if (!matchingOption) {
@@ -315,7 +317,7 @@ export class TossManager {
 
     // Find winners
     const winners = toss.participantOptions.filter(
-      (p) => p.option.toLowerCase() === matchingOption.toLowerCase(),
+      (p) => p.option.toLowerCase() === matchingOption.toLowerCase()
     );
 
     if (!winners.length) {
@@ -343,14 +345,14 @@ export class TossManager {
         if (!winner.inboxId) continue;
 
         const winnerWalletData = await this.walletService.getWallet(
-          winner.inboxId,
+          winner.inboxId
         );
         if (!winnerWalletData) continue;
 
         const transfer = await this.walletService.transfer(
           tossWallet.inboxId,
           winnerWalletData.agent_address,
-          prizePerWinner,
+          prizePerWinner
         );
 
         if (transfer) {
@@ -405,17 +407,17 @@ export class TossManager {
     creator: string,
     prompt: string,
     agent: ReturnType<typeof createReactAgent>,
-    agentConfig: AgentConfig,
+    agentConfig: AgentConfig
   ): Promise<GroupTossName> {
     console.log(
-      `🎲 Creating toss from prompt: "${prompt}" (Creator: ${creator})`,
+      `🎲 Creating toss from prompt: "${prompt}" (Creator: ${creator})`
     );
 
     // Parse the natural language prompt
     const parsedToss = await parseNaturalLanguageToss(
       agent,
       agentConfig,
-      prompt,
+      prompt
     );
 
     if (typeof parsedToss === "string") {
@@ -442,7 +444,7 @@ export async function handleCommand(
   inboxId: string,
   tossManager: TossManager,
   agent: ReturnType<typeof createReactAgent>,
-  agentConfig: AgentConfig,
+  agentConfig: AgentConfig
 ): Promise<string> {
   try {
     const commandParts = content.split(" ");
@@ -457,7 +459,7 @@ export async function handleCommand(
         inboxId,
         tossManager,
         agent,
-        agentConfig,
+        agentConfig
       );
     }
   } catch (error) {
@@ -472,7 +474,7 @@ async function handleExplicitCommand(
   command: string,
   args: string[],
   inboxId: string,
-  tossManager: TossManager,
+  tossManager: TossManager
 ): Promise<string> {
   switch (command.toLowerCase()) {
     case "join": {
@@ -510,10 +512,12 @@ async function handleExplicitCommand(
       if (
         joinedToss.tossOptions &&
         !joinedToss.tossOptions.some(
-          (option) => option.toLowerCase() === chosenOption.toLowerCase(),
+          (option) => option.toLowerCase() === chosenOption.toLowerCase()
         )
       ) {
-        return `Invalid option: ${chosenOption}. Available options: ${joinedToss.tossOptions.join(", ")}`;
+        return `Invalid option: ${chosenOption}. Available options: ${joinedToss.tossOptions.join(
+          ", "
+        )}`;
       }
 
       // Make payment
@@ -521,7 +525,7 @@ async function handleExplicitCommand(
         inboxId,
         tossId,
         toss.tossAmount,
-        chosenOption,
+        chosenOption
       );
 
       if (!paymentSuccess) {
@@ -533,7 +537,7 @@ async function handleExplicitCommand(
         tossId,
         inboxId,
         chosenOption,
-        true,
+        true
       );
 
       // Generate player ID
@@ -593,10 +597,12 @@ Total players: ${updatedToss.participants.length}`;
       if (
         toss.tossOptions &&
         !toss.tossOptions.some(
-          (option) => option.toLowerCase() === winningOption.toLowerCase(),
+          (option) => option.toLowerCase() === winningOption.toLowerCase()
         )
       ) {
-        return `Invalid option. Please choose one of: ${toss.tossOptions.join(", ")}`;
+        return `Invalid option. Please choose one of: ${toss.tossOptions.join(
+          ", "
+        )}`;
       }
 
       // Execute toss
@@ -607,7 +613,9 @@ Total players: ${updatedToss.participants.length}`;
           return "The toss failed to determine a winner. Please try again.";
         }
       } catch (error) {
-        return `Error closing toss: ${error instanceof Error ? error.message : "Unknown error"}`;
+        return `Error closing toss: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`;
       }
 
       // Generate player IDs
@@ -620,7 +628,7 @@ Total players: ${updatedToss.participants.length}`;
             address: player,
             walletAddress,
           };
-        }),
+        })
       );
 
       // Create result message
@@ -637,7 +645,10 @@ Total players: ${updatedToss.participants.length}`;
 
       // List players
       playerMap.forEach((p) => {
-        const displayAddress = `${p.walletAddress.substring(0, 10)}...${p.walletAddress.substring(p.walletAddress.length - 6)}`;
+        const displayAddress = `${p.walletAddress.substring(
+          0,
+          10
+        )}...${p.walletAddress.substring(p.walletAddress.length - 6)}`;
         const playerOption =
           result.participantOptions.find((opt) => opt.inboxId === p.address)
             ?.option || "Unknown";
@@ -648,12 +659,14 @@ Total players: ${updatedToss.participants.length}`;
       const totalPot =
         parseFloat(result.tossAmount) * result.participants.length;
       resultMessage += `\n💰 Total Pot: ${totalPot} USDC\n`;
-      resultMessage += `🎯 Winning Option: ${result.tossResult || "Unknown"}\n\n`;
+      resultMessage += `🎯 Winning Option: ${
+        result.tossResult || "Unknown"
+      }\n\n`;
 
       // Winners
       const winnerIds = result.winner ? result.winner.split(",") : [];
       const winningPlayers = playerMap.filter((p) =>
-        winnerIds.includes(p.address),
+        winnerIds.includes(p.address)
       );
 
       if (winningPlayers.length > 0) {
@@ -661,11 +674,18 @@ Total players: ${updatedToss.participants.length}`;
 
         resultMessage += `🏆 WINNERS (${winningPlayers.length}):\n`;
         winningPlayers.forEach((winner) => {
-          const displayAddress = `${winner.walletAddress.substring(0, 10)}...${winner.walletAddress.substring(winner.walletAddress.length - 6)}`;
+          const displayAddress = `${winner.walletAddress.substring(
+            0,
+            10
+          )}...${winner.walletAddress.substring(
+            winner.walletAddress.length - 6
+          )}`;
           resultMessage += `${winner.id}: ${displayAddress}\n`;
         });
 
-        resultMessage += `\n💸 Prize per winner: ${prizePerWinner.toFixed(6)} USDC\n\n`;
+        resultMessage += `\n💸 Prize per winner: ${prizePerWinner.toFixed(
+          6
+        )} USDC\n\n`;
       } else {
         resultMessage += "No winners found.\n\n";
       }
@@ -698,7 +718,7 @@ async function handleNaturalLanguageCommand(
   inboxId: string,
   tossManager: TossManager,
   agent: ReturnType<typeof createReactAgent>,
-  agentConfig: AgentConfig,
+  agentConfig: AgentConfig
 ): Promise<string> {
   console.log(`🧠 Processing prompt: "${prompt}"`);
 
@@ -713,7 +733,7 @@ async function handleNaturalLanguageCommand(
     inboxId,
     prompt,
     agent,
-    agentConfig,
+    agentConfig
   );
 
   // Create response
@@ -738,7 +758,7 @@ async function handleNaturalLanguageCommand(
 export async function parseNaturalLanguageToss(
   agent: ReturnType<typeof createReactAgent>,
   config: AgentConfig,
-  prompt: string,
+  prompt: string
 ): Promise<ParsedToss> {
   // Default values
   const defaultResult: ParsedToss = {
@@ -808,12 +828,12 @@ export async function parseNaturalLanguageToss(
 export async function processMessage(
   agent: ReturnType<typeof createReactAgent>,
   config: AgentConfig,
-  message: string,
+  message: string
 ): Promise<string> {
   try {
     const stream = await agent.stream(
       { messages: [new HumanMessage(message)] },
-      config,
+      config
     );
 
     let response = "";
@@ -843,7 +863,7 @@ export async function processMessage(
  */
 export async function startMessageListener(
   client: Client,
-  handleMessage: MessageHandler,
+  handleMessage: MessageHandler
 ) {
   console.log("Waiting for messages...");
   const stream = await client.conversations.streamAllMessages();
@@ -864,12 +884,12 @@ export async function startMessageListener(
     }
 
     console.log(
-      `Received: ${message.content as string} from ${message.senderInboxId}`,
+      `Received: ${message.content as string} from ${message.senderInboxId}`
     );
 
     // Get conversation
     const conversation = await client.conversations.getConversationById(
-      message.conversationId,
+      message.conversationId
     );
 
     if (!conversation) {
@@ -897,7 +917,7 @@ export function extractCommand(content: string): string | null {
 async function handleMessage(
   message: DecodedMessage,
   conversation: Conversation,
-  command: string,
+  command: string
 ) {
   try {
     const tossManager = new TossManager();
@@ -907,7 +927,7 @@ async function handleMessage(
     // Initialize agent
     const { agent, config } = await initializeAgent(
       inboxId,
-      AGENT_INSTRUCTIONS,
+      AGENT_INSTRUCTIONS
     );
 
     // Process command
@@ -916,7 +936,7 @@ async function handleMessage(
       inboxId,
       tossManager,
       agent,
-      config,
+      config
     );
 
     await conversation.send(response);
