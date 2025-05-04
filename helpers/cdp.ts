@@ -15,12 +15,12 @@ import {
   type Trade,
   type WalletData,
 } from "@coinbase/coinbase-sdk";
-import { validateEnvironment } from "./helper";
+import { validateEnvironment } from "./client";
 import { MemorySaver } from "@langchain/langgraph";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import { isAddress } from "viem";
-import { storage } from "./storage";
+import { storage } from "../src/storage";
 
 // Initialize the SDK when the module is loaded
 let sdkInitialized = false;
