@@ -22,7 +22,6 @@ async function processMessage(
       return;
     }
     const tossManager = new TossManager();
-    const commandContent = command.replace(/^@toss\s+/i, "").trim();
     const inboxId = message.senderInboxId;
 
     // Initialize agent
@@ -33,8 +32,10 @@ async function processMessage(
 
     // Process command
     const response = await handleCommand(
-      commandContent,
-      inboxId,
+      client,
+      conversation,
+      message,
+      isDm,
       tossManager,
       agent,
       config
@@ -57,6 +58,7 @@ await initializeClient(processMessage, [
     walletKey: WALLET_KEY,
     encryptionKey: ENCRYPTION_KEY,
     acceptGroups: true,
+    networks: ["local"],
   },
 ]);
 

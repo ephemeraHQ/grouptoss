@@ -15,6 +15,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import "dotenv/config";
 import * as fs from "fs";
+import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
+import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
 
 export const getEncryptionKeyFromHex = (hex: string): Uint8Array => {
   return fromString(hex, "hex");
@@ -355,6 +357,7 @@ export const initializeClient = async (
           env: env as XmtpEnv,
           loggingLevel,
           dbPath: getDbPath(`${env}-${signerIdentifier}`),
+          codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
         });
 
         await client.conversations.sync();

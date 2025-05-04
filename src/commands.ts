@@ -2,26 +2,63 @@ import { type createReactAgent } from "@langchain/langgraph/prebuilt";
 import { AgentConfig } from "./types";
 import { HELP_MESSAGE } from "./constants";
 import { TossManager } from "./toss-manager";
+import { createUSDCTransferCalls } from "@helpers/usdc";
+import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
+import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 
 /**
  * Entry point for command processing
  */
 export async function handleCommand(
-  content: string,
-  inboxId: string,
+  client: Client,
+  conversation: Conversation,
+  message: DecodedMessage,
+  isDm: boolean,
   tossManager: TossManager,
   agent: ReturnType<typeof createReactAgent>,
-  agentConfig: AgentConfig
+  agentConfig: AgentConfig,
 ): Promise<string> {
   try {
-    const commandParts = content.split(" ");
+
+    const commandContent = (message.content as string).replace(/^@toss\s+/i, "").trim();
+    const commandParts = commandContent.split(" ");
     const command = commandParts[0].toLowerCase();
 
     if (["join", "close", "help"].includes(command)) {
-      return handleExplicitCommand(command, commandParts.slice(1), inboxId, tossManager);
-    } 
-    return handleNaturalLanguageCommand(content, inboxId, tossManager, agent, agentConfig);
-  } catch (error) {
+      return handleExplicitCommand(command, commandParts.slice(1), message.senderInboxId, tossManager);
+    }   
+    console.log(`🧠 Processing prompt: "${commandContent}"`);
+    const { balance, address } = await tossManager.getBalance(message.senderInboxId);
+      if (balance < 0.01) {
+      const requiredAmount = 0.01;
+      const amountInDecimals = Math.floor(requiredAmount * Math.pow(10, 6));
+      const inboxState = await client.preferences.inboxStateFromInboxIds([
+        message.senderInboxId,
+      ]);
+      const memberAddress = inboxState[0].identifiers[0].identifier;
+      if (!memberAddress) {
+        console.log("Unable to find member address, skipping");
+        return "Unable to find member address, skipping";
+      }
+      const walletSendCalls = createUSDCTransferCalls(
+        memberAddress,
+        client.accountIdentifier?.identifier as string,
+        amountInDecimals,
+      );
+    console.log("Replied with wallet sendcall");
+    conversation.send(walletSendCalls, ContentTypeWalletSendCalls);
+    return `Insufficient USDC balance. You need at least 0.01 USDC to create a toss. Your balance: ${balance} USDC\nUse the button above or transfer USDC to your wallet address: ${address}`;
+  }
+  
+  // Create toss
+  const toss = await tossManager.createGameFromPrompt(message.senderInboxId, message.content as string, agent, agentConfig);
+  
+  // Return concise response
+  return `🎲 Toss Created! 🎲\n\nToss ID: ${toss.id}\nTopic: "${toss.tossTopic}"\n${
+    toss.tossOptions?.length === 2 ? `Options: ${toss.tossOptions[0]} or ${toss.tossOptions[1]}\n` : ''
+  }Toss Amount: ${toss.tossAmount} USDC\n\nOthers can join: join ${toss.id} <option>\nClose toss: close ${toss.id} <option>`;
+
+} catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
 }
@@ -185,29 +222,4 @@ Total players: ${updatedToss.participants.length}`;
   }
 }
 
-/**
- * Handle natural language toss commands
- */
-export async function handleNaturalLanguageCommand(
-  prompt: string,
-  inboxId: string,
-  tossManager: TossManager,
-  agent: ReturnType<typeof createReactAgent>,
-  agentConfig: AgentConfig
-): Promise<string> {
-  console.log(`🧠 Processing prompt: "${prompt}"`);
-  
-  // Check balance
-  const { balance, address } = await tossManager.getBalance(inboxId);
-  if (balance < 0.01) {
-    return `Insufficient USDC balance. You need at least 0.01 USDC to create a toss. Your balance: ${balance} USDC\nTransfer USDC to your wallet address: ${address}`;
-  }
-  
-  // Create toss
-  const toss = await tossManager.createGameFromPrompt(inboxId, prompt, agent, agentConfig);
-  
-  // Return concise response
-  return `🎲 Toss Created! 🎲\n\nToss ID: ${toss.id}\nTopic: "${toss.tossTopic}"\n${
-    toss.tossOptions?.length === 2 ? `Options: ${toss.tossOptions[0]} or ${toss.tossOptions[1]}\n` : ''
-  }Toss Amount: ${toss.tossAmount} USDC\n\nOthers can join: join ${toss.id} <option>\nClose toss: close ${toss.id} <option>`;
-} 
+

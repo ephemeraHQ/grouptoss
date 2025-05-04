@@ -966,15 +966,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@xmtp/content-type-primitives@npm:^2.0.1":
-  version: 2.0.1
-  resolution: "@xmtp/content-type-primitives@npm:2.0.1"
-  dependencies:
-    "@xmtp/proto": "npm:^3.78.0"
-  checksum: 10/966d17a2ef9b70452348651e7eb56d858608d4b910343bdc8886bc73693040ea34ce69bac74bd4367404f6cf6f7b6ec7b25a2dd25c507fc35bee1447065ea02d
-  languageName: node
-  linkType: hard
-
 "@xmtp/content-type-primitives@npm:^2.0.2":
   version: 2.0.2
   resolution: "@xmtp/content-type-primitives@npm:2.0.2"
@@ -993,12 +984,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@xmtp/content-type-wallet-send-calls@npm:^1.0.0":
-  version: 1.0.0
-  resolution: "@xmtp/content-type-wallet-send-calls@npm:1.0.0"
+"@xmtp/content-type-transaction-reference@npm:^2.0.2":
+  version: 2.0.2
+  resolution: "@xmtp/content-type-transaction-reference@npm:2.0.2"
   dependencies:
-    "@xmtp/content-type-primitives": "npm:^2.0.1"
-  checksum: 10/8157fe51b8917c12c924cb011faedd0391b6881915a1401de34909379f03559f5b4507c7bd9759671f744ebdea7d43d54ade957b77a6fad95cd99cbb96902a7e
+    "@xmtp/content-type-primitives": "npm:^2.0.2"
+  checksum: 10/37437069fe47812647f856f871d83d95e62a35dd297f30578a3857dc90575284dad56ad3d734eeb1fe3599aa43512c2ae9e492b41404c492bdd70f9e7d03f734
+  languageName: node
+  linkType: hard
+
+"@xmtp/content-type-wallet-send-calls@npm:^1.0.1":
+  version: 1.0.1
+  resolution: "@xmtp/content-type-wallet-send-calls@npm:1.0.1"
+  dependencies:
+    "@xmtp/content-type-primitives": "npm:^2.0.2"
+  checksum: 10/96ae24f14f6ff86f72ad2b09ed81ec3398947ddce1e6b5c0fe83324b66a83f797ee75976f66a8937cff025e0cc7bfab444547371011c43687f6ba6eae51c3ba2
   languageName: node
   linkType: hard
 
@@ -3637,7 +3637,8 @@ __metadata:
     "@langchain/core": "npm:^0.3.20"
     "@langchain/langgraph": "npm:^0.2.24"
     "@langchain/openai": "npm:^0.3.14"
-    "@xmtp/content-type-wallet-send-calls": "npm:^1.0.0"
+    "@xmtp/content-type-transaction-reference": "npm:^2.0.2"
+    "@xmtp/content-type-wallet-send-calls": "npm:^1.0.1"
     "@xmtp/node-sdk": "npm:2.0.8"
     dotenv: "npm:^16.4.7"
     rimraf: "npm:^6.0.1"
