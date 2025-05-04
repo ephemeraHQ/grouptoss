@@ -25,7 +25,7 @@ export async function handleCommand(
     const commandParts = commandContent.split(" ");
     const command = commandParts[0].toLowerCase();
 
-    if (["join", "close", "help"].includes(command)) {
+    if (["join", "close", "help","balance"].includes(command)) {
       return handleExplicitCommand(command, commandParts.slice(1), message.senderInboxId, tossManager);
     }   
     console.log(`🧠 Processing prompt: "${commandContent}"`);
@@ -85,6 +85,10 @@ export async function handleExplicitCommand(
   tossManager: TossManager
 ): Promise<string> {
   switch (command) {
+    case "balance": {
+      const { balance, address } = await tossManager.getBalance(inboxId);
+      return `Your balance is ${balance} USDC. Your address is ${address}`;
+    }
     case "join": {
       const [tossId, chosenOption] = args;
       
@@ -115,10 +119,7 @@ export async function handleExplicitCommand(
       const updatedToss = await tossManager.addPlayerToGame(tossId, inboxId, chosenOption, true);
       const playerId = `P${updatedToss.participants.findIndex(p => p === inboxId) + 1}`;
       
-      let response = `Successfully joined toss ${tossId}! Payment of ${toss.tossAmount} USDC sent.
-Your Player ID: ${playerId}
-Your Choice: ${chosenOption}
-Total players: ${updatedToss.participants.length}`;
+      let response = `Successfully joined toss ${tossId}! Payment of ${toss.tossAmount} USDC sent.\nYour Player ID: ${playerId}\nYour Choice: ${chosenOption}\nTotal players: ${updatedToss.participants.length}`;
 
       if (updatedToss.tossTopic) {
         response += `\nToss Topic: "${updatedToss.tossTopic}"`;
