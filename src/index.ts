@@ -59,7 +59,7 @@ await initializeClient(processMessage, [
     walletKey: WALLET_KEY,
     encryptionKey: ENCRYPTION_KEY,
     acceptGroups: true,
-    networks: ["local"],
+    networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
   },
 ]);
 
