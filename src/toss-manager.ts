@@ -1,55 +1,37 @@
 import * as fs from "fs/promises";
 import { type createReactAgent } from "@langchain/langgraph/prebuilt";
 import { WalletService } from "@helpers/cdp";
-import { AgentConfig, GroupTossName, Participant, ParsedToss, TossStatus, Transfer } from "./types";
+import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
 import { storage } from "./storage";
 import { parseNaturalLanguageToss } from "./utils";
 
 export class TossManager {
-  private walletService: WalletService;
+  private walletService = new WalletService();
 
-  constructor() {
-    this.walletService = new WalletService();
-  }
-
-  async getBalance(
-    inboxId: string
-  ): Promise<{ address: string | undefined; balance: number }> {
+  async getBalance(inboxId: string): Promise<{ address?: string; balance: number }> {
     try {
-      const balance = await this.walletService.checkBalance(inboxId);
-      return { address: balance.address, balance: balance.balance };
+      return await this.walletService.checkBalance(inboxId);
     } catch (error) {
       console.error("Error getting user balance:", error);
-      return { address: undefined, balance: 0 };
+      return { balance: 0 };
     }
   }
 
   async getPlayerWalletAddress(inboxId: string): Promise<string | undefined> {
     try {
-      const walletData = await this.walletService.getWallet(inboxId);
-      return walletData?.agent_address;
+      return (await this.walletService.getWallet(inboxId))?.agent_address;
     } catch (error) {
       console.error(`Error getting wallet address for ${inboxId}:`, error);
       return undefined;
     }
   }
 
-  async createGame(
-    creator: string,
-    tossAmount: string
-  ): Promise<GroupTossName> {
-    console.log(
-      `🎮 CREATING NEW TOSS (Creator: ${creator}, Amount: ${tossAmount} USDC)`
-    );
+  async createGame(creator: string, tossAmount: string): Promise<GroupTossName> {
+    console.log(`🎮 CREATING NEW TOSS (Creator: ${creator}, Amount: ${tossAmount} USDC)`);
 
-    // Get the next toss ID
-    const lastIdToss = await this.getLastIdToss();
-    const tossId = (lastIdToss + 1).toString();
-
-    // Create a wallet for this toss
+    const tossId = ((await this.getLastIdToss()) + 1).toString();
     const tossWallet = await this.walletService.createWallet(tossId);
-    console.log(`✅ Toss wallet created: ${tossWallet.agent_address}`);
-
+    
     const toss: GroupTossName = {
       id: tossId,
       creator,
@@ -64,10 +46,7 @@ export class TossManager {
     };
 
     await storage.saveToss(toss);
-    console.log(
-      `🎮 Toss ${tossId} created successfully with wallet ${tossWallet.agent_address}`
-    );
-
+    console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.agent_address}`);
     return toss;
   }
 
@@ -78,46 +57,34 @@ export class TossManager {
     hasPaid: boolean
   ): Promise<GroupTossName> {
     const toss = await storage.getToss(tossId);
-    if (!toss) {
-      throw new Error("Toss not found");
-    }
+    if (!toss) throw new Error("Toss not found");
 
     if (
-      toss.status !== TossStatus.CREATED &&
+      toss.status !== TossStatus.CREATED && 
       toss.status !== TossStatus.WAITING_FOR_PLAYER
-    ) {
-      throw new Error("Toss is not accepting players");
-    }
+    ) throw new Error("Toss is not accepting players");
 
-    if (toss.participants.includes(player)) {
+    if (toss.participants.includes(player)) 
       throw new Error("You are already in this toss");
-    }
 
-    if (!hasPaid) {
+    if (!hasPaid) 
       throw new Error(`Please pay ${toss.tossAmount} USDC to join the toss`);
-    }
 
-    // Validate the chosen option
+    // Validate chosen option
     if (toss.tossOptions?.length) {
       const normalizedOption = chosenOption.toLowerCase();
-      const normalizedAvailableOptions = toss.tossOptions.map((opt: string) =>
-        opt.toLowerCase()
-      );
+      const normalizedAvailableOptions = toss.tossOptions.map(opt => opt.toLowerCase());
 
       if (!normalizedAvailableOptions.includes(normalizedOption)) {
         throw new Error(
-          `Invalid option: ${chosenOption}. Available options: ${toss.tossOptions.join(
-            ", "
-          )}`
+          `Invalid option: ${chosenOption}. Available options: ${toss.tossOptions.join(", ")}`
         );
       }
     }
 
-    // Add player to participants
+    // Add player
     toss.participants.push(player);
     toss.participantOptions.push({ inboxId: player, option: chosenOption });
-
-    // Update toss status
     toss.status = TossStatus.WAITING_FOR_PLAYER;
 
     await storage.updateToss(toss);
@@ -126,22 +93,16 @@ export class TossManager {
 
   async joinGame(tossId: string, player: string): Promise<GroupTossName> {
     const toss = await storage.getToss(tossId);
-    if (!toss) {
-      throw new Error("Toss not found");
-    }
+    if (!toss) throw new Error("Toss not found");
 
     if (
-      toss.status !== TossStatus.CREATED &&
+      toss.status !== TossStatus.CREATED && 
       toss.status !== TossStatus.WAITING_FOR_PLAYER
-    ) {
-      throw new Error("Toss is not accepting players");
-    }
+    ) throw new Error("Toss is not accepting players");
 
-    if (toss.participants.includes(player)) {
+    if (toss.participants.includes(player))
       throw new Error("You are already in this toss");
-    }
 
-    // Return toss info without adding player yet
     return toss;
   }
 
@@ -151,25 +112,17 @@ export class TossManager {
     amount: string,
     chosenOption: string
   ): Promise<boolean> {
-    console.log(
-      `💸 Processing payment: User ${inboxId}, Toss ${tossId}, Amount ${amount}, Option ${chosenOption}`
-    );
+    console.log(`💸 Processing payment: User ${inboxId}, Toss ${tossId}, Amount ${amount}, Option ${chosenOption}`);
 
     try {
-      // Get toss wallet
       const toss = await storage.getToss(tossId);
-      if (!toss) {
-        throw new Error("Toss not found");
-      }
+      if (!toss) throw new Error("Toss not found");
 
-      // Transfer funds
-      const transfer = await this.walletService.transfer(
+      return !!await this.walletService.transfer(
         inboxId,
         toss.walletAddress,
         parseFloat(amount)
       );
-
-      return !!transfer;
     } catch (error) {
       console.error(`❌ Payment error:`, error);
       return false;
@@ -180,36 +133,28 @@ export class TossManager {
     tossId: string,
     winningOption: string
   ): Promise<GroupTossName> {
-    console.log(
-      `🎲 Executing toss: ${tossId}, winning option: ${winningOption}`
-    );
+    console.log(`🎲 Executing toss: ${tossId}, winning option: ${winningOption}`);
 
     const toss = await storage.getToss(tossId);
-    if (!toss) {
-      throw new Error("Toss not found");
-    }
+    if (!toss) throw new Error("Toss not found");
 
     // Validate toss state
-    if (toss.status !== TossStatus.WAITING_FOR_PLAYER) {
+    if (toss.status !== TossStatus.WAITING_FOR_PLAYER)
       throw new Error(`Toss is not ready (status: ${toss.status})`);
-    }
 
-    if (toss.participants.length < 2) {
+    if (toss.participants.length < 2)
       throw new Error("Toss needs at least 2 players");
-    }
 
-    if (!toss.participantOptions.length) {
+    if (!toss.participantOptions.length)
       throw new Error("No participant options found");
-    }
 
-    // Get options from toss or participant choices
+    // Get options
     const options = toss.tossOptions?.length
       ? toss.tossOptions
-      : [...new Set(toss.participantOptions.map((p: Participant) => p.option))];
+      : [...new Set(toss.participantOptions.map(p => p.option))];
 
-    if (options.length < 2) {
+    if (options.length < 2)
       throw new Error("Not enough unique options");
-    }
 
     // Set toss in progress
     toss.status = TossStatus.IN_PROGRESS;
@@ -217,7 +162,7 @@ export class TossManager {
 
     // Validate winning option
     const matchingOption = options.find(
-        (option: string) => option.toLowerCase() === winningOption.toLowerCase()
+      option => option.toLowerCase() === winningOption.toLowerCase()
     );
 
     if (!matchingOption) {
@@ -227,12 +172,10 @@ export class TossManager {
       throw new Error(`Invalid winning option: ${winningOption}`);
     }
 
-    // Set the result
+    // Set result and find winners
     toss.tossResult = matchingOption;
-
-    // Find winners
     const winners = toss.participantOptions.filter(
-      (p: Participant) => p.option.toLowerCase() === matchingOption.toLowerCase()
+      p => p.option.toLowerCase() === matchingOption.toLowerCase()
     );
 
     if (!winners.length) {
@@ -259,14 +202,12 @@ export class TossManager {
       try {
         if (!winner.inboxId) continue;
 
-        const winnerWalletData = await this.walletService.getWallet(
-          winner.inboxId
-        );
-        if (!winnerWalletData) continue;
+        const winnerWallet = await this.walletService.getWallet(winner.inboxId);
+        if (!winnerWallet) continue;
 
         const transfer = await this.walletService.transfer(
           tossWallet.inboxId,
-          winnerWalletData.agent_address,
+          winnerWallet.agent_address,
           prizePerWinner
         );
 
@@ -275,9 +216,8 @@ export class TossManager {
 
           // Set transaction link from first successful transfer
           if (!toss.transactionLink) {
-            const transferData = transfer as unknown as Transfer;
-            toss.transactionLink =
-              transferData.model?.sponsored_send?.transaction_link;
+            const transferData = transfer as any;
+            toss.transactionLink = transferData.model?.sponsored_send?.transaction_link;
           }
         }
       } catch (error) {
@@ -287,7 +227,7 @@ export class TossManager {
 
     // Complete the toss
     toss.status = TossStatus.COMPLETED;
-    toss.winner = winners.map((w: Participant) => w.inboxId).join(",");
+    toss.winner = winners.map(w => w.inboxId).join(",");
     toss.paymentSuccess = successfulTransfers.length === winners.length;
 
     await storage.updateToss(toss);
@@ -300,13 +240,11 @@ export class TossManager {
 
   async getLastIdToss(): Promise<number> {
     try {
-      const tossesDir = storage.getTossStorageDir();
-      const files = await fs.readdir(tossesDir);
-
-      // Extract numeric IDs from filenames (like "1-base-sepolia.json")
+      const files = await fs.readdir(storage.getTossStorageDir());
+      
       const tossIds = files
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => {
+        .filter(file => file.endsWith(".json"))
+        .map(file => {
           const match = file.match(/^(\d+)-/);
           return match ? parseInt(match[1], 10) : 0;
         });
@@ -324,29 +262,16 @@ export class TossManager {
     agent: ReturnType<typeof createReactAgent>,
     agentConfig: AgentConfig
   ): Promise<GroupTossName> {
-    console.log(
-      `🎲 Creating toss from prompt: "${prompt}" (Creator: ${creator})`
-    );
+    console.log(`🎲 Creating toss from prompt: "${prompt}" (Creator: ${creator})`);
 
-    // Parse the natural language prompt
-    const parsedToss = await parseNaturalLanguageToss(
-      agent,
-      agentConfig,
-      prompt
-    );
+    const parsedToss = await parseNaturalLanguageToss(agent, agentConfig, prompt);
+    if (typeof parsedToss === "string") throw new Error(parsedToss);
 
-    if (typeof parsedToss === "string") {
-      throw new Error(parsedToss);
-    }
-
-    // Create the toss
     const toss = await this.createGame(creator, parsedToss.amount);
-
-    // Add parsed information
     toss.tossTopic = parsedToss.topic;
     toss.tossOptions = parsedToss.options;
+    
     await storage.updateToss(toss);
-
     return toss;
   }
 } 
