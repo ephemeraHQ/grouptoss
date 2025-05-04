@@ -65,6 +65,8 @@ export function createUSDCTransferCalls(
   fromAddress: string,
   recipientAddress: string,
   amount: number,
+  additionalMetadata?: Record<string, any>,
+  description?: string,
 ): WalletSendCallsParams {
   const methodSignature = "0xa9059cbb"; // Function signature for ERC20 'transfer(address,uint256)'
 
@@ -86,17 +88,17 @@ export function createUSDCTransferCalls(
         to: config.tokenAddress as `0x${string}`,
         data: transactionData as `0x${string}`,
         metadata: {
-          description: `Transfer ${amount / Math.pow(10, config.decimals)} USDC on ${config.networkName}`,
+          description: description ?? `Transfer ${amount / Math.pow(10, config.decimals)} USDC on ${config.networkName}`,
           transactionType: "transfer",
           currency: "USDC",
           amount: amount,
           decimals: config.decimals,
           networkId: config.networkId,
+          ...additionalMetadata  // Merge additional metadata if provided
         },
       },
       /* add more calls here */
     ],
   };
-  console.log("walletSendCalls", walletSendCalls,walletSendCalls.calls[0].metadata);
   return walletSendCalls;
 }

@@ -15,7 +15,7 @@
     "@coinbase/coinbase-sdk": "^0.22.0",
     "@langchain/core": "^0.3.20",
     "@langchain/langgraph": "^0.2.24",
-    "@langchain/openai": "^0.3.14",
+    "@langchain/openai": "latest",
     "@xmtp/content-type-transaction-reference": "^2.0.2",
     "@xmtp/content-type-wallet-send-calls": "^1.0.1",
     "@xmtp/node-sdk": "2.0.8",

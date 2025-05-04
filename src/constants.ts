@@ -12,8 +12,10 @@ for example:
 "Will it rain tomorrow for 5" - Creates a yes/no toss with 5 USDC
 "Lakers vs Celtics for 10" - Creates a toss with Lakers and Celtics as options with 10 USDC
 
+When a toss is created, you can join by clicking on the payment buttons for your preferred option.
+
 Other commands:
-@toss join <tossId> <option> - Join an existing toss with the specified ID and your chosen option
+@toss join <tossId> <option> - Join an existing toss manually with the specified ID and your chosen option
 @toss close <tossId> <option> - Close the toss and set the winning option (only for toss creator)
 @toss balance - Check your toss wallet balance
 @toss help - Show this help message

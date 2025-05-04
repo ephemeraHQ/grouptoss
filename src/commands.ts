@@ -8,6 +8,44 @@ import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { parseNaturalLanguageToss } from "./utils";
 
 /**
+ * Create wallet send calls buttons for joining a toss with specific options
+ */
+async function createJoinTossWalletSendCalls(
+  client: Client,
+  tossId: string, 
+  tossAmount: string, 
+  walletAddress: string, 
+  senderInboxId: string,
+  option: string
+): Promise<{ walletSendCalls: any, memberAddress: string }> {
+  // Convert amount to decimals (6 for USDC)
+  const amountInDecimals = Math.floor(parseFloat(tossAmount) * Math.pow(10, 6));
+  
+  // Get the user's wallet address from their inbox ID
+  const inboxState = await client.preferences.inboxStateFromInboxIds([senderInboxId]);
+  const memberAddress = inboxState[0].identifiers[0].identifier;
+  
+  if (!memberAddress) {
+    throw new Error("Unable to find member address");
+  }
+  
+  // Create the wallet send calls with option metadata
+  const walletSendCalls = createUSDCTransferCalls(
+    memberAddress,
+    walletAddress,
+    amountInDecimals,
+    // Add metadata about the option selected
+    {
+      tossId,
+      selectedOption: option
+    }
+    ,"Join with " + option + " 👇 "
+  );
+  
+  return { walletSendCalls, memberAddress };
+}
+
+/**
  * Entry point for command processing
  */
 export async function handleCommand(
@@ -66,10 +104,53 @@ export async function handleCommand(
   // Create toss
   const toss = await tossManager.createGameFromPrompt(message.senderInboxId, commandContent, agent, agentConfig);
   
-  // Return concise response
-  return `🎲 Toss Created! 🎲\n\nToss ID: ${toss.id}\nTopic: "${toss.tossTopic}"\n${
+  // Send initial response about toss creation
+  const responseText = `🎲 Toss Created! 🎲\n\nToss ID: ${toss.id}\nTopic: "${toss.tossTopic}"\n${
     toss.tossOptions?.length === 2 ? `Options: ${toss.tossOptions[0]} or ${toss.tossOptions[1]}\n` : ''
-  }Toss Amount: ${toss.tossAmount} USDC\n\nOthers can join: join ${toss.id} <option>\nClose toss: close ${toss.id} <option>`;
+  }Toss Amount: ${toss.tossAmount} USDC\n\nTo join, select an option below:`;
+  
+  await conversation.send(responseText);
+  
+  // If we have exactly two options, send wallet send calls for both options
+  if (toss.tossOptions?.length === 2) {
+    // Create and send wallet send call for option 1
+    try {
+      const option1 = toss.tossOptions[0];
+      const { walletSendCalls: option1SendCall } = await createJoinTossWalletSendCalls(
+        client, 
+        toss.id, 
+        toss.tossAmount, 
+        toss.walletAddress, 
+        message.senderInboxId,
+        option1
+      );
+      
+      await conversation.send(option1SendCall, ContentTypeWalletSendCalls);
+      
+      // Create and send wallet send call for option 2
+      const option2 = toss.tossOptions[1];
+      const { walletSendCalls: option2SendCall } = await createJoinTossWalletSendCalls(
+        client, 
+        toss.id, 
+        toss.tossAmount, 
+        toss.walletAddress, 
+        message.senderInboxId,
+        option2
+      );
+      
+      await conversation.send(option2SendCall, ContentTypeWalletSendCalls);
+      
+    } catch (error) {
+      console.error("Error creating wallet send calls:", error);
+      await conversation.send("Error creating join options. Please try again.");
+    }
+  } else {
+    // If we don't have exactly 2 options, instruct to use the text command
+    await conversation.send("You can still join using the command: join " + toss.id + " <option>");
+  }
+  
+  // Return empty string since we've already sent all responses
+  return "";
 
 } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -129,9 +210,6 @@ export async function handleExplicitCommand(
         }
       }
 
-      response += inboxId === toss.creator
-        ? `\n\nAs the creator, you can close the toss with: close ${tossId} <option>`
-        : `\n\nWaiting for the toss creator to close the toss.`;
 
       return response;
     }
