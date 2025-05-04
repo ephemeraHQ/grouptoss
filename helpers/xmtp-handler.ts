@@ -136,36 +136,24 @@ export const initializeClient = async (
               console.log(`[${env}] Unable to find conversation, skipping`);
               continue;
             }
-            if(options.welcomeMessage) {
-              sendWelcomeMessage(client, conversation, options.welcomeMessage);
-            }
-
+           
             console.log(
               `[${env}] Received message: ${message.content as string} from ${message.senderInboxId}`,
             );
 
             const isDm = conversation instanceof Dm;
+            if(options.welcomeMessage && isDm) {
+              sendWelcomeMessage(client, conversation, options.welcomeMessage);
+            }
 
             if (isDm || options.acceptGroups) {
               try {
-                // Call the message handler and handle the returned value
-                const result = messageHandler(
+                messageHandler(
                   client,
                   conversation,
                   message,
                   isDm,
                 );
-                // Check if result is a Promise before calling catch
-                if (result && typeof result.catch === "function") {
-                  result.catch((error: unknown) => {
-                    const errorMessage =
-                      error instanceof Error ? error.message : String(error);
-                    console.error(
-                      `[${env}] Message handler error:`,
-                      errorMessage,
-                    );
-                  });
-                }
               } catch (handlerError) {
                 console.error(
                   `[${env}] Error in message handler:`,
@@ -223,9 +211,7 @@ export const initializeClient = async (
 
         // Try to re-sync conversations before retrying
         try {
-          console.log(`[${env}] Attempting to re-sync conversations...`);
           await client.conversations.sync();
-          console.log(`[${env}] Conversations re-synced successfully`);
         } catch (syncError) {
           console.error(`[${env}] Sync error:`, syncError);
         }
@@ -348,13 +334,6 @@ export const initializeClient = async (
   }
 
   logAgentDetails(clients);
-    
-
-  // Handle graceful shutdowns
-  process.on("SIGINT", () => {
-    console.log("\nShutting down clients...");
-    process.exit(0);
-  });
 
   await Promise.all(streamPromises);
   return clients;
@@ -379,11 +358,11 @@ export const logAgentDetails = (clients: Client[]): void => {
     ];
 
     console.log(`
-✓ XMTP Client Ready:
-• Address: ${address}
-• InboxId: ${inboxId}
-• Networks: ${environments}
-${urls.map(url => `• URL: ${url}`).join("\n")}`);
+    ✓ XMTP Client:
+    • Address: ${address}
+    • InboxId: ${inboxId}
+    • Networks: ${environments}
+    ${urls.map(url => `• URL: ${url}`).join("\n")}`);
   }
 };
 
