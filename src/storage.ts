@@ -3,7 +3,7 @@ import * as fs from "fs/promises";
 import path from "path";
 import { validateEnvironment } from "@helpers/client";
 import type { AgentWalletData } from "@helpers/cdp";
-import { TossStatus, type GroupTossName } from "./index";
+import { TossStatus, type GroupTossName } from "./types";
 
 const { NETWORK_ID } = validateEnvironment(["NETWORK_ID"]);
 export const WALLET_STORAGE_DIR = ".data/wallet_data";
