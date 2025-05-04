@@ -77,7 +77,7 @@ export function createUSDCTransferCalls(
   if (!config) {
     throw new Error("Network not found");
   }
-  return {
+  const walletSendCalls = {
     version: "1.0",
     from: fromAddress as `0x${string}`,
     chainId: config.chainId,
@@ -97,4 +97,6 @@ export function createUSDCTransferCalls(
       /* add more calls here */
     ],
   };
+  console.log("walletSendCalls", walletSendCalls,walletSendCalls.calls[0].metadata);
+  return walletSendCalls;
 }

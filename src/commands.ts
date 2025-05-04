@@ -40,7 +40,8 @@ export async function handleCommand(
     const requiredAmount = parseFloat(parsedToss.amount);
     
     // Check if user has sufficient balance
-    const { balance, address } = await tossManager.getBalance(message.senderInboxId);
+    const { balance, address:agentAddress } = await tossManager.getBalance(message.senderInboxId);
+    console.log("agentAddress", agentAddress);
     if (balance < requiredAmount) {
       const amountInDecimals = Math.floor(requiredAmount * Math.pow(10, 6));
       const inboxState = await client.preferences.inboxStateFromInboxIds([
@@ -53,7 +54,7 @@ export async function handleCommand(
       }
       const walletSendCalls = createUSDCTransferCalls(
         memberAddress,
-        client.accountIdentifier?.identifier as string,
+        agentAddress as string,
         amountInDecimals,
       );
     console.log("Replied with wallet sendcall");
