@@ -6,6 +6,8 @@ import { AGENT_INSTRUCTIONS } from "./constants";
 import { extractCommand } from "./utils";
 import { TossManager } from "./toss-manager";
 import { handleCommand } from "./commands";
+import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
+import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
 
 /**
  * Process a transaction reference that might be related to a toss
@@ -167,6 +169,8 @@ async function main() {
       acceptGroups: true,
       acceptTypes: ["text", "transaction-reference"],
       networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
+      welcomeMessage: "Welcome to the Toss game! Use /toss to create a new toss or /join to join an existing toss. Use /help for more information.",
+      codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
     },
   ]);
 }

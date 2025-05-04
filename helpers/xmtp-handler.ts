@@ -1,59 +1,23 @@
-import { getRandomValues } from "node:crypto";
 import {
   Client,
   Dm,
-  IdentifierKind,
   type Conversation,
   type DecodedMessage,
   type LogLevel,
-  type Signer,
   type XmtpEnv,
 } from "@xmtp/node-sdk";
-import { fromString, toString } from "uint8arrays";
-import { createWalletClient, http, toBytes } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import {
+  createSigner,
+  getEncryptionKeyFromHex,
+  getDbPath,
+} from "./client";
+
 import "dotenv/config";
-import * as fs from "fs";
-import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
-import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
-
-export const getEncryptionKeyFromHex = (hex: string): Uint8Array => {
-  return fromString(hex, "hex");
-};
-
-/**
- * Create a Signer instance from a private key
- * @param key - The private key to create the Signer from
- * @returns A Signer instance
- */
-export const createSigner = (key: string): Signer => {
-  const sanitizedKey = key.startsWith("0x") ? key : `0x${key}`;
-  const account = privateKeyToAccount(sanitizedKey as `0x${string}`);
-
-  return {
-    type: "EOA",
-    getIdentifier: () => ({
-      identifierKind: IdentifierKind.Ethereum,
-      identifier: account.address.toLowerCase(),
-    }),
-    signMessage: async (message: string) => {
-      const signature = await createWalletClient({
-        account,
-        chain: sepolia,
-        transport: http(),
-      }).signMessage({
-        message,
-        account,
-      });
-      return toBytes(signature);
-    },
-  };
-};
-
 /**
  * Configuration options for the XMTP agent
  */
+import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
+import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
 interface AgentOptions {
   walletKey: string;
   /** Whether to accept group conversations */
@@ -70,6 +34,10 @@ interface AgentOptions {
   connectionTimeout?: number;
   /** Whether to auto-reconnect on fatal errors (default: true) */
   autoReconnect?: boolean;
+  /** Welcome message to send to the conversation */
+  welcomeMessage?: string;
+  /** Codecs to use */
+  codecs?: any[];
 }
 
 /**
@@ -99,21 +67,6 @@ const DEFAULT_AGENT_OPTIONS: AgentOptions[] = [
   },
 ];
 
-/**
- * Generate a new encryption key (utility function)
- */
-export const generateEncryptionKeyHex = (): string => {
-  const uint8Array = getRandomValues(new Uint8Array(32));
-  return toString(uint8Array, "hex");
-};
-
-export const getDbPath = (description: string = "xmtp"): string => {
-  const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH ?? ".data/xmtp";
-  if (!fs.existsSync(volumePath)) {
-    fs.mkdirSync(volumePath, { recursive: true });
-  }
-  return `${volumePath}/${description}.db3`;
-};
 
 // Helper functions
 export const sleep = (ms: number): Promise<void> =>
@@ -182,6 +135,9 @@ export const initializeClient = async (
             if (!conversation) {
               console.log(`[${env}] Unable to find conversation, skipping`);
               continue;
+            }
+            if(options.welcomeMessage) {
+              sendWelcomeMessage(client, conversation, options.welcomeMessage);
             }
 
             console.log(
@@ -357,7 +313,7 @@ export const initializeClient = async (
           env: env as XmtpEnv,
           loggingLevel,
           dbPath: getDbPath(`${env}-${signerIdentifier}`),
-          codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
+          codecs: option.codecs,
         });
 
         await client.conversations.sync();
@@ -428,5 +384,21 @@ export const logAgentDetails = (clients: Client[]): void => {
 • InboxId: ${inboxId}
 • Networks: ${environments}
 ${urls.map(url => `• URL: ${url}`).join("\n")}`);
+  }
+};
+
+export const sendWelcomeMessage = async (client: Client, conversation: Conversation,  welcomeMessage: string) => {
+
+  // Get all messages from this conversation
+  const messages = await conversation.messages();
+  // Check if we have sent any messages in this conversation before
+  const sentMessagesBefore = messages.filter(
+    (msg) => msg.senderInboxId.toLowerCase() === client.inboxId.toLowerCase(),
+  );
+  // If we haven't sent any messages before, send a welcome message and skip validation for this message
+  if (sentMessagesBefore.length === 0) {
+    console.log(`Sending welcome message`);
+    await conversation.send(welcomeMessage);
+    return;
   }
 };
