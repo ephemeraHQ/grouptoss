@@ -21,6 +21,7 @@ async function handleTransactionReference(
   try {
     
     console.log(`📝 Processing transaction reference:`, message.content);
+    console.log(`Transaction reference full structure: ${JSON.stringify(message.content, null, 2)}`);
     
     // Get the transaction reference content
     const txRef = message.content as any;
@@ -28,11 +29,33 @@ async function handleTransactionReference(
     // Check if this transaction is a toss payment
     // The metadata is nested in the transaction object in content
     const metadata = txRef?.metadata || {};
+    console.log("Transaction metadata:", metadata);
+    
+    // Try to extract metadata from other possible locations
+    const calls = txRef?.calls || [];
+    if (calls.length > 0) {
+      console.log("Transaction calls:", calls);
+      // Check if metadata is in the first call
+      const callMetadata = calls[0]?.metadata || {};
+      console.log("First call metadata:", callMetadata);
+      
+      // If we found metadata in the call, use it
+      if (callMetadata.tossId && callMetadata.selectedOption) {
+        console.log("Found toss metadata in call metadata");
+        const tossId = callMetadata.tossId;
+        const selectedOption = callMetadata.selectedOption;
+        
+        console.log(`🎮 Detected toss payment from call: Toss #${tossId}, Option: ${selectedOption}`);
+        
+        // Process the toss join with this metadata
+        await processTossJoin(client, conversation, message, tossManager, tossId, selectedOption, txRef);
+        return;
+      }
+    }
+    
+    // Continue with normal flow
     const tossId = metadata.tossId;
     const selectedOption = metadata.selectedOption;
-    
-    // Log metadata for debugging
-    console.log("Transaction metadata:", metadata);
     
     if (!tossId || !selectedOption) {
       console.log("Transaction reference doesn't contain toss metadata");
@@ -41,6 +64,27 @@ async function handleTransactionReference(
     
     console.log(`🎮 Detected toss payment: Toss #${tossId}, Option: ${selectedOption}`);
     
+    // Process the toss join
+    await processTossJoin(client, conversation, message, tossManager, tossId, selectedOption, txRef);
+    
+  } catch (error) {
+    console.error("Error handling transaction reference:", error);
+  }
+}
+
+/**
+ * Helper function to process a toss join after receiving transaction reference
+ */
+async function processTossJoin(
+  client: Client,
+  conversation: Conversation,
+  message: DecodedMessage,
+  tossManager: TossManager,
+  tossId: string,
+  selectedOption: string,
+  txRef: any
+): Promise<void> {
+  try {
     // Get the toss details
     const toss = await tossManager.getToss(tossId);
     if (!toss) {
@@ -91,7 +135,8 @@ async function handleTransactionReference(
       await conversation.send(`⚠️ Error joining toss: ${error instanceof Error ? error.message : String(error)}`);
     }
   } catch (error) {
-    console.error("Error handling transaction reference:", error);
+    console.error("Error processing toss join:", error);
+    await conversation.send(`⚠️ Error joining toss: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -155,6 +200,83 @@ async function main() {
     "WALLET_KEY",
     "ENCRYPTION_KEY",
   ]);
+
+  // For debugging: Create a test transaction reference handler
+  if (process.argv.includes("--test-transaction")) {
+    console.log("🧪 Testing transaction reference processing...");
+    const tossManager = new TossManager();
+    const clients = await initializeClient(processMessage, [
+      {
+        walletKey: WALLET_KEY,
+        encryptionKey: ENCRYPTION_KEY,
+        acceptGroups: true,
+        acceptTypes: ["text", "transactionReference"],
+        networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
+        welcomeMessage: "Welcome to the Toss game! Use /toss to create a new toss or /join to join an existing toss. Use /help for more information.",
+        codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
+      },
+    ]);
+    
+    // Get the first client
+    const client = clients[0];
+    
+    const testReference = {
+      networkId: "0x14a34", // This is the same as in the user's example
+      reference: "0x03bd02d9e6a285e31a3a9f2fc36fcfc5075999d9c98219e4f20890c40bec54e2",
+      // Add custom metadata for testing
+      metadata: {
+        tossId: "1",
+        selectedOption: "heads",
+      }
+    };
+    
+    const testReferenceWithCalls = {
+      networkId: "0x14a34",
+      reference: "0x03bd02d9e6a285e31a3a9f2fc36fcfc5075999d9c98219e4f20890c40bec54e2",
+      calls: [
+        {
+          to: "0xCeC31BE083C9214D1340e224EBc22E327c587b2d",
+          metadata: {
+            tossId: "1",
+            selectedOption: "tails",
+            transactionType: "transfer",
+            currency: "USDC"
+          }
+        }
+      ]
+    };
+    
+    // Create a mock message for testing
+    const mockMessage = {
+      content: testReference,
+      contentType: { typeId: "transactionReference" },
+      senderInboxId: "830d9926b1758299ee1279853c2edc387ebd18ca22ef6bea5d2a74dcbbf0e8ac",
+      conversationId: "test",
+    };
+    
+    // Create a mock conversation for testing
+    const mockConversation = {
+      id: "test",
+      send: async (content: any) => {
+        console.log("Mock conversation response:", content);
+        return "message-id";
+      }
+    };
+    
+    console.log("🧪 Testing with direct metadata");
+    await handleTransactionReference(client, mockConversation as any, mockMessage as any, tossManager);
+    
+    // Modify the mock message to test calls-based metadata
+    const mockMessageWithCalls = {
+      ...mockMessage,
+      content: testReferenceWithCalls
+    };
+    
+    console.log("\n🧪 Testing with calls-based metadata");
+    await handleTransactionReference(client, mockConversation as any, mockMessageWithCalls as any, tossManager);
+    
+    return;
+  }
 
   // Initialize client
   await initializeClient(processMessage, [
