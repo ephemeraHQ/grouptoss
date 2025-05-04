@@ -117,12 +117,6 @@ async function processMessage(
       return;
     }
     
-    // Handle wallet send calls
-    if (message.contentType?.typeId === "wallet-send-calls") {
-      // Just acknowledge receipt
-      console.log("Received wallet send calls message", message.content);
-      return;
-    }
     
     // Handle text commands
     const command = extractCommand(message.content as string);
@@ -160,10 +154,9 @@ async function processMessage(
  */
 async function main() {
   // Validate environment
-  const { WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV } = validateEnvironment([
+  const { WALLET_KEY, ENCRYPTION_KEY } = validateEnvironment([
     "WALLET_KEY",
     "ENCRYPTION_KEY",
-    "XMTP_ENV"
   ]);
 
   // Initialize client
@@ -172,8 +165,8 @@ async function main() {
       walletKey: WALLET_KEY,
       encryptionKey: ENCRYPTION_KEY,
       acceptGroups: true,
-      acceptTypes: ["text", "transaction-reference", "wallet-send-calls"],
-      networks: XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
+      acceptTypes: ["text", "transaction-reference"],
+      networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
     },
   ]);
 }
