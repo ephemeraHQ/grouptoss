@@ -19,10 +19,6 @@ async function handleTransactionReference(
   tossManager: TossManager
 ): Promise<void> {
   try {
-    // Only process transaction references
-    if (message.contentType?.typeId !== "transaction-reference") {
-      return;
-    }
     
     console.log(`📝 Processing transaction reference:`, message.content);
     
@@ -112,9 +108,8 @@ async function processMessage(
     // Initialize toss manager
     const tossManager = new TossManager();
     const inboxId = message.senderInboxId;
-    
     // Handle transaction references
-    if (message.contentType?.typeId === "transaction-reference") {
+    if (message.contentType?.typeId === "transactionReference") {
       await handleTransactionReference(client, conversation, message, tossManager);
       return;
     }
@@ -167,7 +162,7 @@ async function main() {
       walletKey: WALLET_KEY,
       encryptionKey: ENCRYPTION_KEY,
       acceptGroups: true,
-      acceptTypes: ["text", "transaction-reference"],
+      acceptTypes: ["text", "transactionReference"],
       networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
       welcomeMessage: "Welcome to the Toss game! Use /toss to create a new toss or /join to join an existing toss. Use /help for more information.",
       codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],

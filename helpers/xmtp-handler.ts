@@ -16,8 +16,6 @@ import "dotenv/config";
 /**
  * Configuration options for the XMTP agent
  */
-import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
-import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
 interface AgentOptions {
   walletKey: string;
   /** Whether to accept group conversations */
@@ -117,7 +115,6 @@ export const initializeClient = async (
           try {
             // Notify activity monitor on each message
             if (onActivity) onActivity();
-
             // Skip messages from self or with unsupported content types
             if (
               !message ||
