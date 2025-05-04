@@ -40,9 +40,10 @@ async function processMessage(
       agent,
       config
     );
-
-    await conversation.send(response);
-    console.log(`✅ Response sent: ${response.substring(0, 50)}...`);
+    if (response) {
+      await conversation.send(response);
+      console.log(`✅ Response sent: ${response.substring(0, 50)}...`);
+    }
   } catch (error) {
     console.error("Error:", error);
   }

@@ -5,6 +5,7 @@ import { TossManager } from "./toss-manager";
 import { createUSDCTransferCalls } from "@helpers/usdc";
 import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
+import { parseNaturalLanguageToss } from "./utils";
 
 /**
  * Entry point for command processing
@@ -28,9 +29,19 @@ export async function handleCommand(
       return handleExplicitCommand(command, commandParts.slice(1), message.senderInboxId, tossManager);
     }   
     console.log(`🧠 Processing prompt: "${commandContent}"`);
+    
+    // Parse the toss to get the required amount
+    const parsedToss = await parseNaturalLanguageToss(agent, agentConfig, commandContent);
+    if (typeof parsedToss === "string") {
+      return parsedToss; // Return error message if parsing failed
+    }
+    
+    // Use the parsed amount or default to 1 USDC
+    const requiredAmount = parseFloat(parsedToss.amount);
+    
+    // Check if user has sufficient balance
     const { balance, address } = await tossManager.getBalance(message.senderInboxId);
-      if (balance < 0.01) {
-      const requiredAmount = 0.01;
+    if (balance < requiredAmount) {
       const amountInDecimals = Math.floor(requiredAmount * Math.pow(10, 6));
       const inboxState = await client.preferences.inboxStateFromInboxIds([
         message.senderInboxId,
@@ -46,8 +57,9 @@ export async function handleCommand(
         amountInDecimals,
       );
     console.log("Replied with wallet sendcall");
-    conversation.send(walletSendCalls, ContentTypeWalletSendCalls);
-    return `Insufficient USDC balance. You need at least 0.01 USDC to create a toss. Your balance: ${balance} USDC\nUse the button above or transfer USDC to your wallet address: ${address}`;
+    await conversation.send(`Insufficient USDC balance. You need at least ${requiredAmount} USDC to create a toss.`);
+    await conversation.send(walletSendCalls, ContentTypeWalletSendCalls);
+    return ""
   }
   
   // Create toss
