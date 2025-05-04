@@ -103,6 +103,12 @@ export class TossManager {
     if (toss.participants.includes(player))
       throw new Error("You are already in this toss");
 
+    // Add player to participants list without option selection
+    toss.participants.push(player);
+    toss.status = TossStatus.WAITING_FOR_PLAYER;
+    
+    // Persist changes to storage
+    await storage.updateToss(toss);
     return toss;
   }
 

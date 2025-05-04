@@ -63,7 +63,7 @@ export async function handleCommand(
   }
   
   // Create toss
-  const toss = await tossManager.createGameFromPrompt(message.senderInboxId, message.content as string, agent, agentConfig);
+  const toss = await tossManager.createGameFromPrompt(message.senderInboxId, commandContent, agent, agentConfig);
   
   // Return concise response
   return `🎲 Toss Created! 🎲\n\nToss ID: ${toss.id}\nTopic: "${toss.tossTopic}"\n${
