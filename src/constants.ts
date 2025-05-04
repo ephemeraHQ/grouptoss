@@ -15,6 +15,7 @@ for example:
 Other commands:
 @toss join <tossId> <option> - Join an existing toss with the specified ID and your chosen option
 @toss close <tossId> <option> - Close the toss and set the winning option (only for toss creator)
+@toss balance - Check your toss wallet balance
 @toss help - Show this help message
 `;
 
