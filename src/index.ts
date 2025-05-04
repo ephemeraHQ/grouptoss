@@ -6,18 +6,117 @@ import {
   type Conversation,
   type DecodedMessage,
 } from "@xmtp/node-sdk";
-import { initializeAgent, WalletService } from "./cdp";
-import {
-  extractJsonFromResponse,
-  initializeXmtpClient,
-  TossStatus,
-  type AgentConfig,
-  type GroupTossName,
-  type MessageHandler,
-  type ParsedToss,
-  type StreamChunk,
-} from "./helper";
+import { initializeAgent, WalletService } from "@helpers/cdp";
+import { initializeClient } from "@helpers/xmtp-handler";
+
+// Interface for parsed JSON response
+export interface TossJsonResponse {
+  topic?: string;
+  options?: string[];
+  amount?: string;
+  valid?: boolean;
+  reason?: string;
+}
+/**
+ * Extract JSON from agent response text
+ * @param response The text response from agent
+ * @returns Parsed JSON object or null if not found
+ */
+export function extractJsonFromResponse(
+  response: string
+): TossJsonResponse | null {
+  try {
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]) as TossJsonResponse;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error parsing JSON from agent response:", error);
+    return null;
+  }
+}
 import { storage } from "./storage";
+import { validateEnvironment } from "@helpers/client";
+
+
+// Interface to track participant options
+export interface Participant {
+  inboxId: string;
+  option: string;
+}
+
+export interface GroupTossName {
+  id: string;
+  creator: string;
+  tossAmount: string;
+  status: TossStatus;
+  participants: string[]; // Maintaining for backward compatibility
+  participantOptions: Participant[]; // New field to track participant options
+  winner?: string;
+  walletAddress: string;
+  createdAt: number;
+  tossResult?: string;
+  paymentSuccess?: boolean;
+  transactionLink?: string;
+  tossTopic?: string;
+  tossOptions?: string[];
+}
+
+export enum TossStatus {
+  CREATED = "CREATED",
+  WAITING_FOR_PLAYER = "WAITING_FOR_PLAYER",
+  READY = "READY",
+  IN_PROGRESS = "IN_PROGRESS",
+  COMPLETED = "COMPLETED",
+  CANCELLED = "CANCELLED",
+}
+
+export interface TransferResponse {
+  model?: {
+    sponsored_send?: {
+      transaction_link?: string;
+    };
+  };
+}
+
+export interface AgentConfig {
+  configurable: {
+    thread_id: string;
+  };
+}
+
+// Interface for parsed toss information
+export interface ParsedToss {
+  topic: string;
+  options: string[];
+  amount: string;
+}
+
+// Define stream chunk types
+export interface AgentChunk {
+  agent: {
+    messages: Array<{
+      content: string;
+    }>;
+  };
+}
+
+export interface ToolsChunk {
+  tools: {
+    messages: Array<{
+      content: string;
+    }>;
+  };
+}
+
+export type StreamChunk = AgentChunk | ToolsChunk;
+
+export type MessageHandler = (
+  message: DecodedMessage,
+  conversation: Conversation,
+  command: string
+) => Promise<void>;
 
 // Constants
 const DEFAULT_OPTIONS = ["yes", "no"];
@@ -290,7 +389,7 @@ export class TossManager {
     // Get options from toss or participant choices
     const options = toss.tossOptions?.length
       ? toss.tossOptions
-      : [...new Set(toss.participantOptions.map((p) => p.option))];
+      : [...new Set(toss.participantOptions.map((p: Participant) => p.option))];
 
     if (options.length < 2) {
       throw new Error("Not enough unique options");
@@ -302,7 +401,7 @@ export class TossManager {
 
     // Validate winning option
     const matchingOption = options.find(
-      (option) => option.toLowerCase() === winningOption.toLowerCase()
+        (option: string) => option.toLowerCase() === winningOption.toLowerCase()
     );
 
     if (!matchingOption) {
@@ -317,7 +416,7 @@ export class TossManager {
 
     // Find winners
     const winners = toss.participantOptions.filter(
-      (p) => p.option.toLowerCase() === matchingOption.toLowerCase()
+      (p: Participant) => p.option.toLowerCase() === matchingOption.toLowerCase()
     );
 
     if (!winners.length) {
@@ -372,7 +471,7 @@ export class TossManager {
 
     // Complete the toss
     toss.status = TossStatus.COMPLETED;
-    toss.winner = winners.map((w) => w.inboxId).join(",");
+    toss.winner = winners.map((w: Participant) => w.inboxId).join(",");
     toss.paymentSuccess = successfulTransfers.length === winners.length;
 
     await storage.updateToss(toss);
@@ -800,7 +899,7 @@ export async function parseNaturalLanguageToss(
     `;
 
   // Process with agent
-  const response = await processMessage(agent, config, parsingRequest);
+  const response = await processAgentMessage(agent, config, parsingRequest);
   const parsedJson = extractJsonFromResponse(response);
 
   if (!parsedJson) {
@@ -825,7 +924,7 @@ export async function parseNaturalLanguageToss(
 /**
  * Process a message with the agent
  */
-export async function processMessage(
+export async function processAgentMessage(
   agent: ReturnType<typeof createReactAgent>,
   config: AgentConfig,
   message: string
@@ -858,49 +957,6 @@ export async function processMessage(
   }
 }
 
-/**
- * Start listening for messages
- */
-export async function startMessageListener(
-  client: Client,
-  handleMessage: MessageHandler
-) {
-  console.log("Waiting for messages...");
-  const stream = await client.conversations.streamAllMessages();
-
-  for await (const message of stream) {
-    // Skip messages from the same agent or non-text messages
-    if (
-      message?.senderInboxId.toLowerCase() === client.inboxId.toLowerCase() ||
-      message?.contentType?.typeId !== "text"
-    ) {
-      continue;
-    }
-
-    // Extract command
-    const command = extractCommand(message.content as string);
-    if (!command) {
-      continue; // No command found
-    }
-
-    console.log(
-      `Received: ${message.content as string} from ${message.senderInboxId}`
-    );
-
-    // Get conversation
-    const conversation = await client.conversations.getConversationById(
-      message.conversationId
-    );
-
-    if (!conversation) {
-      console.log("Conversation not found, skipping");
-      continue;
-    }
-
-    // Handle message
-    await handleMessage(message, conversation, command);
-  }
-}
 
 /**
  * Extract command from message content
@@ -914,12 +970,17 @@ export function extractCommand(content: string): string | null {
 /**
  * Message handler function
  */
-async function handleMessage(
-  message: DecodedMessage,
+async function processMessage(
+  client: Client,
   conversation: Conversation,
-  command: string
-) {
+  message: DecodedMessage,
+  isDm: boolean,
+): Promise<void> {
   try {
+    const command = extractCommand(message.content as string);
+    if (!command) {
+      return;
+    }
     const tossManager = new TossManager();
     const commandContent = command.replace(/^@toss\s+/i, "").trim();
     const inboxId = message.senderInboxId;
@@ -946,17 +1007,16 @@ async function handleMessage(
   }
 }
 
-/**
- * Main entry point
- */
-async function main(): Promise<void> {
-  console.log("Starting CoinToss agent...");
+const { WALLET_KEY, ENCRYPTION_KEY } = validateEnvironment([
+  "WALLET_KEY",
+  "ENCRYPTION_KEY",
+]);
 
-  // Initialize XMTP client
-  const xmtpClient = await initializeXmtpClient();
+await initializeClient(processMessage, [
+  {
+    walletKey: WALLET_KEY,
+    encryptionKey: ENCRYPTION_KEY,
+    acceptGroups: true,
+  },
+]);
 
-  // Start listening for messages
-  await startMessageListener(xmtpClient, handleMessage);
-}
-
-main().catch(console.error);
