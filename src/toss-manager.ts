@@ -4,6 +4,7 @@ import { WalletService } from "@helpers/cdp";
 import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
 import { storage } from "./storage";
 import { parseNaturalLanguageToss } from "./utils";
+import { MAX_USDC_AMOUNT } from "./constants";
 
 export class TossManager {
   private walletService = new WalletService();
@@ -33,6 +34,16 @@ export class TossManager {
 
   async createGame(creator: string, tossAmount: string): Promise<GroupTossName> {
     console.log(`🎮 CREATING NEW TOSS (Creator: ${creator}, Amount: ${tossAmount} USDC)`);
+    
+    // Validate toss amount
+    const amount = parseFloat(tossAmount);
+    if (isNaN(amount)) {
+      throw new Error(`Invalid toss amount: ${tossAmount}`);
+    }
+    
+    if (amount > MAX_USDC_AMOUNT) {
+      throw new Error(`Toss amount ${amount} exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
+    }
 
     const tossId = ((await this.getLastIdToss()) + 1).toString();
     const tossWallet = await this.walletService.createWallet(tossId);

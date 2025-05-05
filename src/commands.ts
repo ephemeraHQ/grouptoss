@@ -2,7 +2,7 @@ import { type createReactAgent } from "@langchain/langgraph/prebuilt";
 import { AgentConfig } from "./types";
 import { HELP_MESSAGE } from "./constants";
 import { TossManager } from "./toss-manager";
-import { createUSDCTransferCalls } from "@helpers/usdc";
+import { createUSDCTransferCalls } from   "./transactions";
 import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { parseNaturalLanguageToss } from "./utils";
@@ -56,7 +56,7 @@ async function createJoinTossWalletSendCalls(
       selectedOption: option,
       option: option, // Alternative field name
       choice: option, // Another alternative field name
-      description: `Option: ${option}`, // Include in description too
+      description: `Option: ${option} 👇`, // Include in description too
       isFirstOption: isFirstOption, // Explicitly indicate if this is the first option
       tossOptions: tossOptions // Pass all available options
     },
