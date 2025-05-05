@@ -4,9 +4,15 @@ import { WalletService } from "@helpers/cdp";
 import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
 import { storage } from "./storage";
 import { parseNaturalLanguageToss } from "./utils";
+import { MAX_USDC_AMOUNT } from "./constants";
 
 export class TossManager {
   private walletService = new WalletService();
+
+  // Getter for walletService
+  get walletServiceInstance(): WalletService {
+    return this.walletService;
+  }
 
   async getBalance(inboxId: string): Promise<{ address?: string; balance: number }> {
     try {
@@ -26,8 +32,18 @@ export class TossManager {
     }
   }
 
-  async createGame(creator: string, tossAmount: string): Promise<GroupTossName> {
+  async createGame(creator: string, tossAmount: string, conversationId?: string): Promise<GroupTossName> {
     console.log(`🎮 CREATING NEW TOSS (Creator: ${creator}, Amount: ${tossAmount} USDC)`);
+    
+    // Validate toss amount
+    const amount = parseFloat(tossAmount);
+    if (isNaN(amount)) {
+      throw new Error(`Invalid toss amount: ${tossAmount}`);
+    }
+    
+    if (amount > MAX_USDC_AMOUNT) {
+      throw new Error(`Toss amount ${amount} exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
+    }
 
     const tossId = ((await this.getLastIdToss()) + 1).toString();
     const tossWallet = await this.walletService.createWallet(tossId);
@@ -46,7 +62,15 @@ export class TossManager {
     };
 
     await storage.saveToss(toss);
-    console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.agent_address}`);
+    
+    // If conversationId is provided, associate this toss with the conversation
+    if (conversationId) {
+      await storage.saveGroupTossMapping(conversationId, tossId);
+      console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.agent_address} and linked to group ${conversationId}`);
+    } else {
+      console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.agent_address}`);
+    }
+    
     return toss;
   }
 
@@ -232,10 +256,77 @@ export class TossManager {
     }
 
     // Complete the toss
-    toss.status = TossStatus.COMPLETED;
-    toss.winner = winners.map(w => w.inboxId).join(",");
-    toss.paymentSuccess = successfulTransfers.length === winners.length;
+    toss.paymentSuccess = successfulTransfers.length > 0;
+    toss.status = successfulTransfers.length > 0 
+      ? TossStatus.COMPLETED 
+      : TossStatus.CANCELLED;
+    
+    await storage.updateToss(toss);
+    return toss;
+  }
 
+  /**
+   * Force close a toss and return funds to all participants
+   * @param tossId The ID of the toss to force close
+   * @returns The updated toss object
+   */
+  async forceCloseToss(tossId: string): Promise<GroupTossName> {
+    console.log(`🚫 Force closing toss: ${tossId}`);
+
+    const toss = await storage.getToss(tossId);
+    if (!toss) throw new Error("Toss not found");
+
+    // Set toss in progress
+    toss.status = TossStatus.IN_PROGRESS;
+    await storage.updateToss(toss);
+
+    // Get the toss wallet
+    const tossWallet = await this.walletService.getWallet(tossId);
+    if (!tossWallet) {
+      toss.status = TossStatus.CANCELLED;
+      toss.paymentSuccess = false;
+      await storage.updateToss(toss);
+      throw new Error("Toss wallet not found");
+    }
+
+    // Track successful refunds
+    const successfulTransfers: string[] = [];
+
+    // Return funds to each participant
+    for (const participant of toss.participants) {
+      try {
+        if (!participant) continue;
+
+        // Get participant wallet
+        const participantWallet = await this.walletService.getWallet(participant);
+        if (!participantWallet) continue;
+
+        // Return their original entry amount
+        const transfer = await this.walletService.transfer(
+          tossWallet.inboxId,
+          participantWallet.agent_address,
+          parseFloat(toss.tossAmount)
+        );
+
+        if (transfer) {
+          successfulTransfers.push(participant);
+
+          // Set transaction link from first successful transfer
+          if (!toss.transactionLink) {
+            const transferData = transfer as any;
+            toss.transactionLink = transferData.model?.sponsored_send?.transaction_link;
+          }
+        }
+      } catch (error) {
+        console.error(`Refund error for ${participant}:`, error);
+      }
+    }
+
+    // Mark toss as cancelled
+    toss.paymentSuccess = successfulTransfers.length > 0;
+    toss.status = TossStatus.CANCELLED;
+    toss.tossResult = "FORCE_CLOSED";
+    
     await storage.updateToss(toss);
     return toss;
   }
@@ -247,17 +338,17 @@ export class TossManager {
   async getLastIdToss(): Promise<number> {
     try {
       const files = await fs.readdir(storage.getTossStorageDir());
-      
-      const tossIds = files
-        .filter(file => file.endsWith(".json"))
-        .map(file => {
-          const match = file.match(/^(\d+)-/);
-          return match ? parseInt(match[1], 10) : 0;
-        });
+      const tossFiles = files.filter(file => file.endsWith(".json") && !isNaN(Number(file.split("-")[0])));
 
-      return tossIds.length > 0 ? Math.max(...tossIds) : 0;
+      if (tossFiles.length === 0) return 0;
+
+      const lastId = Math.max(
+        ...tossFiles.map(file => Number(file.split("-")[0]))
+      );
+
+      return lastId;
     } catch (error) {
-      console.error("Error counting tosses:", error);
+      console.error("Error getting last toss ID:", error);
       return 0;
     }
   }
@@ -266,18 +357,61 @@ export class TossManager {
     creator: string,
     prompt: string,
     agent: ReturnType<typeof createReactAgent>,
-    agentConfig: AgentConfig
+    agentConfig: AgentConfig,
+    conversationId?: string
   ): Promise<GroupTossName> {
-    console.log(`🎲 Creating toss from prompt: "${prompt}" (Creator: ${creator})`);
-
+    // Generate toss details using LLM
     const parsedToss = await parseNaturalLanguageToss(agent, agentConfig, prompt);
-    if (typeof parsedToss === "string") throw new Error(parsedToss);
+    if (typeof parsedToss === "string") {
+      throw new Error(parsedToss);
+    }
 
-    const toss = await this.createGame(creator, parsedToss.amount);
+    // Create base toss
+    const toss = await this.createGame(creator, parsedToss.amount, conversationId);
+
+    // Add topic and options
     toss.tossTopic = parsedToss.topic;
     toss.tossOptions = parsedToss.options;
-    
+
+    // Update storage
     await storage.updateToss(toss);
     return toss;
+  }
+
+  /**
+   * Get active toss ID for a conversation
+   * @param conversationId The conversation ID
+   * @returns The active toss ID or null if none exists
+   */
+  async getActiveTossForConversation(conversationId: string): Promise<GroupTossName | null> {
+    const tossId = await storage.getGroupTossMapping(conversationId);
+    if (!tossId) return null;
+    
+    const toss = await this.getToss(tossId);
+    
+    // If toss is completed or cancelled, remove the mapping
+    if (toss && [TossStatus.COMPLETED, TossStatus.CANCELLED].includes(toss.status)) {
+      await storage.removeGroupTossMapping(conversationId);
+      return null;
+    }
+    
+    return toss;
+  }
+  
+  /**
+   * Set the active toss for a conversation
+   * @param conversationId The conversation ID
+   * @param tossId The toss ID to set as active
+   */
+  async setActiveTossForConversation(conversationId: string, tossId: string): Promise<void> {
+    await storage.saveGroupTossMapping(conversationId, tossId);
+  }
+  
+  /**
+   * Remove the active toss mapping for a conversation
+   * @param conversationId The conversation ID
+   */
+  async clearActiveTossForConversation(conversationId: string): Promise<void> {
+    await storage.removeGroupTossMapping(conversationId);
   }
 } 

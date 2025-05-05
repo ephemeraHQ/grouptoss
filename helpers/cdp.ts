@@ -21,6 +21,7 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import { isAddress } from "viem";
 import { storage } from "../src/storage";
+import { MAX_USDC_AMOUNT } from "../src/constants";
 
 // Initialize the SDK when the module is loaded
 let sdkInitialized = false;
@@ -218,7 +219,7 @@ export class WalletService {
   /**
    * Check if an address belongs to a toss wallet and return the corresponding toss ID
    */
-  private async getTossIdFromAddress(address: string): Promise<string | null> {
+  public async getTossIdFromAddress(address: string): Promise<string | null> {
     if (!isAddress(address)) return null;
 
     try {
@@ -252,6 +253,12 @@ export class WalletService {
     console.log(`💸 Amount: ${amount} USDC`);
     console.log(`🔍 From user: ${inboxId}`);
     console.log(`🔍 To: ${toAddress}`);
+
+    // Validate amount is not above the maximum limit
+    if (amount > MAX_USDC_AMOUNT) {
+      console.error(`❌ Amount ${amount} exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
+      return undefined;
+    }
 
     // Get the source wallet
     console.log(`🔑 Retrieving source wallet for user: ${inboxId}...`);

@@ -1,7 +1,7 @@
 import { HumanMessage } from "@langchain/core/messages";
 import { type createReactAgent } from "@langchain/langgraph/prebuilt";
 import { AgentConfig, ParsedToss, StreamChunk, TossJsonResponse } from "./types";
-import { DEFAULT_AMOUNT, DEFAULT_OPTIONS } from "./constants";
+import { DEFAULT_AMOUNT, DEFAULT_OPTIONS, MAX_USDC_AMOUNT } from "./constants";
 
 /**
  * Extract JSON from agent response text
@@ -127,6 +127,16 @@ export async function parseNaturalLanguageToss(
     return `Invalid toss request: ${parsedJson.reason}`;
   }
 
+  // Get the amount from extracted amount, parsed JSON, or default
+  let amount = extractedAmount || parsedJson.amount || DEFAULT_AMOUNT;
+  
+  // Enforce maximum amount
+  const numericAmount = parseFloat(amount);
+  if (numericAmount > MAX_USDC_AMOUNT) {
+    console.log(`Amount ${numericAmount} exceeds maximum ${MAX_USDC_AMOUNT} USDC, capping at maximum`);
+    amount = MAX_USDC_AMOUNT.toString();
+  }
+
   // Combine parsed data with defaults
   return {
     topic: parsedJson.topic ?? prompt,
@@ -134,6 +144,6 @@ export async function parseNaturalLanguageToss(
       Array.isArray(parsedJson.options) && parsedJson.options.length >= 2
         ? [parsedJson.options[0], parsedJson.options[1]]
         : DEFAULT_OPTIONS,
-    amount: extractedAmount || parsedJson.amount || DEFAULT_AMOUNT,
+    amount: amount,
   };
 } 

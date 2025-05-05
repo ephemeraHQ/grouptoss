@@ -1,7 +1,8 @@
 // Constants
 export const DEFAULT_OPTIONS = ["yes", "no"];
-export const DEFAULT_AMOUNT = "1";
+export const DEFAULT_AMOUNT = "0.1";
 export const USDC_TOKEN_ADDRESS = "0x5dEaC602762362FE5f135FA5904351916053cF70";
+export const MAX_USDC_AMOUNT = 10; // Maximum allowed USDC transaction amount
 
 // Help message for users
 export const HELP_MESSAGE = `Available commands:
@@ -9,11 +10,13 @@ export const HELP_MESSAGE = `Available commands:
 @toss <natural language toss> - Create a toss using natural language
 
 for example:
-"Will it rain tomorrow for 5" - Creates a yes/no toss with 5 USDC
+"Will it rain tomorrow for 0.1" - Creates a yes/no toss with 0.1 USDC
 "Lakers vs Celtics for 10" - Creates a toss with Lakers and Celtics as options with 10 USDC
 
+When a toss is created, you can join by clicking on the payment buttons for your preferred option.
+
 Other commands:
-@toss join <tossId> <option> - Join an existing toss with the specified ID and your chosen option
+@toss join <tossId> <option> - Join an existing toss manually with the specified ID and your chosen option
 @toss close <tossId> <option> - Close the toss and set the winning option (only for toss creator)
 @toss balance - Check your toss wallet balance
 @toss help - Show this help message
@@ -30,11 +33,11 @@ export const AGENT_INSTRUCTIONS = `
   When parsing natural language tosses:
   - Extract the toss topic (what people are tossing on)
   - Identify options (default to "yes" and "no" if not provided)
-  - Determine toss amount (default to 1 USDC if not specified)
+  - Determine toss amount (default to 0.1 USDC if not specified)
   - Enforce a maximum toss amount of 10 USDC
   
   For example:
-  - "Will it rain tomorrow for 5" should be interpreted as a toss on "Will it rain tomorrow" with options ["yes", "no"] and amount "5"
+  - "Will it rain tomorrow for 0.1" should be interpreted as a toss on "Will it rain tomorrow" with options ["yes", "no"] and amount "0.1"
   - "Lakers vs Celtics for 10" should be interpreted as a toss on "Lakers vs Celtics game" with options ["Lakers", "Celtics"] and amount "10"
   
   When checking payments or balances:
