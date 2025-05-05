@@ -6,6 +6,7 @@ import { createUSDCTransferCalls } from   "./transactions";
 import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { parseNaturalLanguageToss } from "./utils";
+import { GroupTossName, Participant } from "./types";
 
 /**
  * Create wallet send calls buttons for joining a toss with specific options
@@ -285,53 +286,77 @@ export async function handleExplicitCommand(
       const tossId = toss.id;
       const winningOption = args.length > 0 ? args.join(" ") : null;
       
-      if (!winningOption) {
-        return `Please specify the winning option: @toss close <option>`;
-      }
-      
       // Check if user is the creator
       if (inboxId !== toss.creator) {
         return "Only the toss creator can close the toss.";
       }
       
-      // Check if enough players
-      if (toss.participants.length < 2) {
-        return "At least 2 players are needed to close the toss.";
+      // Check if force close is requested (no winning option provided)
+      const isForceClose = !winningOption;
+      
+      // Check if there are enough players for a regular close
+      if (toss.participants.length < 2 && !isForceClose) {
+        return "Not enough participants to determine a winner. To force close and return funds, use '@toss close' without specifying an option.";
       }
       
-      // Execute the toss with the specified winning option
+      // Execute the toss with the specified winning option or force close
       try {
-        const closedToss = await tossManager.executeCoinToss(tossId, winningOption);
+        let closedToss: GroupTossName;
         
-        // Clear the group-to-toss mapping after the toss is closed
-        await tossManager.clearActiveTossForConversation(conversationId);
-        
-        // Format winners
-        const winnerEntries = closedToss.participantOptions
-          .filter(p => p.option.toLowerCase() === winningOption.toLowerCase());
-        
-        const totalPot = parseFloat(closedToss.tossAmount) * closedToss.participants.length;
-        const prizePerWinner = totalPot / winnerEntries.length;
-        
-        let response = `🏆 Toss closed! Result: "${winningOption}"\n\n`;
-        
-        if (closedToss.paymentSuccess) {
-          response += `${winnerEntries.length} winner(s)${winnerEntries.length > 0 ? ` with option "${winningOption}"` : ""}\n`;
-          response += `Prize per winner: ${prizePerWinner.toFixed(2)} USDC\n\n`;
-          response += "Winners:\n";
+        if (isForceClose) {
+          // Force close and return funds to original participants
+          closedToss = await tossManager.forceCloseToss(tossId);
           
-          winnerEntries.forEach((winner, index) => {
-            response += `P${closedToss.participants.findIndex(p => p === winner.inboxId) + 1}\n`;
-          });
+          // Clear the group-to-toss mapping after the toss is closed
+          await tossManager.clearActiveTossForConversation(conversationId);
           
-          if (closedToss.transactionLink) {
-            response += `\nTransaction: ${closedToss.transactionLink}`;
+          let response = `🚫 Toss force closed by creator!\n\n`;
+          
+          if (closedToss.paymentSuccess) {
+            response += `All participants have been refunded their ${toss.tossAmount} USDC.\n`;
+            
+            if (closedToss.transactionLink) {
+              response += `\nTransaction: ${closedToss.transactionLink}`;
+            }
+          } else {
+            response += "⚠️ Refund distribution failed. Please contact support.";
           }
+          
+          return response;
         } else {
-          response += "⚠️ Payment distribution failed. Please contact support.";
+          // Regular close with a winning option
+          closedToss = await tossManager.executeCoinToss(tossId, winningOption);
+          
+          // Clear the group-to-toss mapping after the toss is closed
+          await tossManager.clearActiveTossForConversation(conversationId);
+          
+          // Format winners
+          const winnerEntries = closedToss.participantOptions
+            .filter((p: Participant) => p.option.toLowerCase() === winningOption.toLowerCase());
+          
+          const totalPot = parseFloat(closedToss.tossAmount) * closedToss.participants.length;
+          const prizePerWinner = totalPot / winnerEntries.length;
+          
+          let response = `🏆 Toss closed! Result: "${winningOption}"\n\n`;
+          
+          if (closedToss.paymentSuccess) {
+            response += `${winnerEntries.length} winner(s)${winnerEntries.length > 0 ? ` with option "${winningOption}"` : ""}\n`;
+            response += `Prize per winner: ${prizePerWinner.toFixed(2)} USDC\n\n`;
+            response += "Winners:\n";
+            
+            winnerEntries.forEach((winner: Participant) => {
+              response += `P${closedToss.participants.findIndex(p => p === winner.inboxId) + 1}\n`;
+            });
+            
+            if (closedToss.transactionLink) {
+              response += `\nTransaction: ${closedToss.transactionLink}`;
+            }
+          } else {
+            response += "⚠️ Payment distribution failed. Please contact support.";
+          }
+          
+          return response;
         }
-        
-        return response;
       } catch (error) {
         return `Error closing toss: ${error instanceof Error ? error.message : String(error)}`;
       }

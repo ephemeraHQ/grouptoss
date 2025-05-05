@@ -265,6 +265,72 @@ export class TossManager {
     return toss;
   }
 
+  /**
+   * Force close a toss and return funds to all participants
+   * @param tossId The ID of the toss to force close
+   * @returns The updated toss object
+   */
+  async forceCloseToss(tossId: string): Promise<GroupTossName> {
+    console.log(`🚫 Force closing toss: ${tossId}`);
+
+    const toss = await storage.getToss(tossId);
+    if (!toss) throw new Error("Toss not found");
+
+    // Set toss in progress
+    toss.status = TossStatus.IN_PROGRESS;
+    await storage.updateToss(toss);
+
+    // Get the toss wallet
+    const tossWallet = await this.walletService.getWallet(tossId);
+    if (!tossWallet) {
+      toss.status = TossStatus.CANCELLED;
+      toss.paymentSuccess = false;
+      await storage.updateToss(toss);
+      throw new Error("Toss wallet not found");
+    }
+
+    // Track successful refunds
+    const successfulTransfers: string[] = [];
+
+    // Return funds to each participant
+    for (const participant of toss.participants) {
+      try {
+        if (!participant) continue;
+
+        // Get participant wallet
+        const participantWallet = await this.walletService.getWallet(participant);
+        if (!participantWallet) continue;
+
+        // Return their original entry amount
+        const transfer = await this.walletService.transfer(
+          tossWallet.inboxId,
+          participantWallet.agent_address,
+          parseFloat(toss.tossAmount)
+        );
+
+        if (transfer) {
+          successfulTransfers.push(participant);
+
+          // Set transaction link from first successful transfer
+          if (!toss.transactionLink) {
+            const transferData = transfer as any;
+            toss.transactionLink = transferData.model?.sponsored_send?.transaction_link;
+          }
+        }
+      } catch (error) {
+        console.error(`Refund error for ${participant}:`, error);
+      }
+    }
+
+    // Mark toss as cancelled
+    toss.paymentSuccess = successfulTransfers.length > 0;
+    toss.status = TossStatus.CANCELLED;
+    toss.tossResult = "FORCE_CLOSED";
+    
+    await storage.updateToss(toss);
+    return toss;
+  }
+
   async getToss(tossId: string): Promise<GroupTossName | null> {
     return storage.getToss(tossId);
   }
