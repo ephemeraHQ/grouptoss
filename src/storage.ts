@@ -9,7 +9,8 @@ const { NETWORK_ID } = validateEnvironment(["NETWORK_ID"]);
 export const STORAGE_DIRS = {
   WALLET: ".data/wallet_data",
   XMTP: ".data/xmtp",
-  TOSS: ".data/tosses"
+  TOSS: ".data/tosses",
+  GROUP_MAPPING: ".data/tosses/group_mapping"
 };
 
 /**
@@ -112,6 +113,31 @@ class StorageService {
 
   // updateToss is just an alias for saveToss
   public updateToss = this.saveToss;
+
+  /**
+   * Group to Toss mapping operations
+   */
+  public async saveGroupTossMapping(conversationId: string, tossId: string): Promise<void> {
+    if (!this.initialized) this.initialize();
+    await this.saveToFile(STORAGE_DIRS.GROUP_MAPPING, conversationId, JSON.stringify({ tossId }));
+  }
+
+  public async getGroupTossMapping(conversationId: string): Promise<string | null> {
+    if (!this.initialized) this.initialize();
+    const mapping = await this.readFromFile<{ tossId: string }>(STORAGE_DIRS.GROUP_MAPPING, conversationId);
+    return mapping ? mapping.tossId : null;
+  }
+
+  public async removeGroupTossMapping(conversationId: string): Promise<boolean> {
+    if (!this.initialized) this.initialize();
+    try {
+      const key = `${conversationId}-${NETWORK_ID}`;
+      return await this.deleteFile(STORAGE_DIRS.GROUP_MAPPING, key);
+    } catch (error) {
+      console.error(`Error removing group mapping for ${conversationId}:`, error);
+      return false;
+    }
+  }
 
   /**
    * Wallet operations

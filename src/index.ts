@@ -135,6 +135,15 @@ async function handleTransactionReference(
     
     console.log(`✅ Found toss ID ${tossId} for transaction to ${targetAddress}`);
     
+    // Check if this toss is associated with this conversation
+    const activeToss = await tossManager.getActiveTossForConversation(conversation.id);
+    if (activeToss && activeToss.id !== tossId) {
+      console.log(`Transaction is for toss ${tossId} but the active toss for this conversation is ${activeToss.id}`);
+      // Only proceed if this transaction is for the active toss in this conversation
+      await conversation.send(`⚠️ This payment is for a different toss than the one active in this conversation.`);
+      return;
+    }
+    
     // 4. Try to infer option from prior choices in the toss
     if (!selectedOption) {
       // Get the toss for checking options or prior choices
@@ -200,8 +209,8 @@ async function handleTransactionReference(
       
       // Ask user to select an option
       await conversation.send(
-        `✅ Payment for Toss #${tossId} received! Please choose one of the following options: ${options.join(", ")}\n` +
-        `Reply with "@toss option <your choice>" to confirm your selection.`
+        `✅ Payment received! Please choose one of the following options: ${options.join(", ")}\n` +
+        `Reply with "@toss join <your choice>" to confirm your selection.`
       );
       return;
     }
@@ -238,8 +247,15 @@ async function processTossJoin(
     const toss = await tossManager.getToss(tossId);
     if (!toss) {
       console.log(`Toss ${tossId} not found`);
-      await conversation.send(`⚠️ Toss #${tossId} not found. Your payment might have been received but couldn't be associated with a valid toss.`);
+      await conversation.send(`⚠️ Toss not found. Your payment might have been received but couldn't be associated with a valid toss.`);
       return;
+    }
+    
+    // Associate this toss with the conversation if not already associated
+    const activeToss = await tossManager.getActiveTossForConversation(conversation.id);
+    if (!activeToss) {
+      await tossManager.setActiveTossForConversation(conversation.id, tossId);
+      console.log(`Associated toss ${tossId} with conversation ${conversation.id}`);
     }
     
     // Process the join
@@ -256,7 +272,7 @@ async function processTossJoin(
       const playerId = `P${updatedToss.participants.findIndex(p => p === message.senderInboxId) + 1}`;
       
       // Send confirmation
-      let response = `✅ Successfully joined toss #${tossId}!\nYour Player ID: ${playerId}\nYour Choice: ${selectedOption}\nTotal players: ${updatedToss.participants.length}`;
+      let response = `✅ Successfully joined!\nYour Player ID: ${playerId}\nYour Choice: ${selectedOption}\nTotal players: ${updatedToss.participants.length}`;
       
       if (updatedToss.tossTopic) {
         response += `\nToss Topic: "${updatedToss.tossTopic}"`;
