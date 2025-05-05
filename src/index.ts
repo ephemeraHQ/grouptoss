@@ -2,12 +2,14 @@ import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { initializeAgent } from "@helpers/cdp";
 import { initializeClient } from "@helpers/xmtp-handler";
 import { validateEnvironment } from "@helpers/client";
-import { AGENT_INSTRUCTIONS } from "./constants";
+import { AGENT_INSTRUCTIONS, HELP_MESSAGE } from "./constants";
 import { extractCommand } from "./utils";
 import { TossManager } from "./toss-manager";
 import { handleCommand } from "./commands";
 import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
 import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
+import { verifyTransaction, extractERC20TransferData } from "@helpers/usdc";
+import { checkTransactionWithRetries } from "../helpers/transaction-checker";
 
 /**
  * Process a transaction reference that might be related to a toss
@@ -19,56 +21,101 @@ async function handleTransactionReference(
   tossManager: TossManager
 ): Promise<void> {
   try {
-    
     console.log(`📝 Processing transaction reference:`, message.content);
     console.log(`Transaction reference full structure: ${JSON.stringify(message.content, null, 2)}`);
     
     // Get the transaction reference content
     const txRef = message.content as any;
     
-    // Check if this transaction is a toss payment
-    // The metadata is nested in the transaction object in content
-    const metadata = txRef?.metadata || {};
-    console.log("Transaction metadata:", metadata);
-    
-    // Try to extract metadata from other possible locations
-    const calls = txRef?.calls || [];
-    if (calls.length > 0) {
-      console.log("Transaction calls:", calls);
-      // Check if metadata is in the first call
-      const callMetadata = calls[0]?.metadata || {};
-      console.log("First call metadata:", callMetadata);
-      
-      // If we found metadata in the call, use it
-      if (callMetadata.tossId && callMetadata.selectedOption) {
-        console.log("Found toss metadata in call metadata");
-        const tossId = callMetadata.tossId;
-        const selectedOption = callMetadata.selectedOption;
-        
-        console.log(`🎮 Detected toss payment from call: Toss #${tossId}, Option: ${selectedOption}`);
-        
-        // Process the toss join with this metadata
-        await processTossJoin(client, conversation, message, tossManager, tossId, selectedOption, txRef);
-        return;
-      }
-    }
-    
-    // Continue with normal flow
-    const tossId = metadata.tossId;
-    const selectedOption = metadata.selectedOption;
-    
-    if (!tossId || !selectedOption) {
-      console.log("Transaction reference doesn't contain toss metadata");
+    // Extract transaction hash from the reference
+    const txHash = txRef?.reference;
+    if (!txHash) {
+      console.log("No transaction hash found in reference");
       return;
     }
     
-    console.log(`🎮 Detected toss payment: Toss #${tossId}, Option: ${selectedOption}`);
+    console.log(`🔍 Verifying transaction: ${txHash}`);
+    
+    // Verify the transaction on the blockchain with retries
+    const txDetails = await checkTransactionWithRetries(txHash);
+    if (!txDetails) {
+      console.log("Transaction not found or verification failed after retries");
+      await conversation.send("⚠️ Could not verify the transaction. It may be pending or not yet indexed.");
+      return;
+    }
+    
+    // Check if transaction was successful
+    if (txDetails.status !== 'success') {
+      console.log(`Transaction failed with status: ${txDetails.status}`);
+      await conversation.send(`⚠️ Transaction ${txHash} failed or is still pending.`);
+      return;
+    }
+    
+    console.log(`✅ Transaction verified: From ${txDetails.from} to ${txDetails.to}`);
+    
+    // Check if this is an ERC20 token transfer
+    const transferData = txDetails.data ? extractERC20TransferData(txDetails.data) : null;
+    
+    // Get the transaction target (either direct recipient or token transfer recipient)
+    const targetAddress = transferData?.recipient || txDetails.to;
+    if (!targetAddress) {
+      console.log("Could not determine transaction recipient");
+      return;
+    }
+    
+    // Try to match the recipient address with a toss wallet
+    const tossId = await tossManager.walletServiceInstance.getTossIdFromAddress(targetAddress);
+    if (!tossId) {
+      console.log(`No toss found for address: ${targetAddress}`);
+      return;
+    }
+    
+    console.log(`✅ Found toss ID ${tossId} for transaction to ${targetAddress}`);
+    
+    // Get metadata (if available) to determine the option selected
+    // First try metadata from txRef
+    let selectedOption = txRef?.metadata?.selectedOption;
+    
+    // Also check call metadata if available
+    const calls = txRef?.calls || [];
+    if (!selectedOption && calls.length > 0) {
+      selectedOption = calls[0]?.metadata?.selectedOption;
+    }
+    
+    // If we still don't have an option, request it from the user
+    if (!selectedOption) {
+      // Get the toss details to show available options
+      const toss = await tossManager.getToss(tossId);
+      if (!toss) {
+        console.log(`Toss ${tossId} not found`);
+        return;
+      }
+      
+      // Determine available options
+      const options = toss.tossOptions && toss.tossOptions.length > 0 
+        ? toss.tossOptions 
+        : ["heads", "tails"]; // Default options
+      
+      // Ask user to select an option
+      await conversation.send(
+        `✅ Payment for Toss #${tossId} received! Please choose one of the following options: ${options.join(", ")}\n` +
+        `Reply with "@toss option <your choice>" to confirm your selection.`
+      );
+      return;
+    }
+    
+    console.log(`🎮 Detected toss payment for Toss #${tossId}, Option: ${selectedOption}`);
     
     // Process the toss join
-    await processTossJoin(client, conversation, message, tossManager, tossId, selectedOption, txRef);
+    await processTossJoin(client, conversation, message, tossManager, tossId, selectedOption, txDetails);
     
   } catch (error) {
     console.error("Error handling transaction reference:", error);
+    try {
+      await conversation.send("⚠️ An error occurred while processing your transaction.");
+    } catch (sendError) {
+      console.error("Failed to send error message:", sendError);
+    }
   }
 }
 
@@ -82,7 +129,7 @@ async function processTossJoin(
   tossManager: TossManager,
   tossId: string,
   selectedOption: string,
-  txRef: any
+  txDetails: any
 ): Promise<void> {
   try {
     // Get the toss details
@@ -93,28 +140,14 @@ async function processTossJoin(
       return;
     }
     
-    // Check if payment was successful by verifying transaction recipient
-    // The 'to' field should match the toss wallet address
-    const transactionTo = txRef?.to?.toLowerCase();
-    const tossWalletAddress = toss.walletAddress.toLowerCase();
-    
-    if (transactionTo && transactionTo !== tossWalletAddress) {
-      console.log(`Payment sent to wrong address: ${transactionTo}, expected: ${tossWalletAddress}`);
-      await conversation.send(`⚠️ Payment was sent to ${transactionTo}, but toss wallet is ${tossWalletAddress}.`);
-      return;
-    }
-    
     // Process the join
     try {
-      // First join the game
-      const joinedToss = await tossManager.joinGame(tossId, message.senderInboxId);
-      
-      // Then add player with selected option
+      // Add player with selected option
       const updatedToss = await tossManager.addPlayerToGame(
         tossId, 
         message.senderInboxId, 
         selectedOption, 
-        true // Mark as paid since we received the transaction reference
+        true // Mark as paid since we verified the transaction
       );
       
       // Calculate player ID
@@ -150,6 +183,10 @@ async function processMessage(
   isDm: boolean,
 ): Promise<void> {
   try {
+    if(isDm) {
+      console.log("Not a group, skipping");
+      return;
+    }
     // Initialize toss manager
     const tossManager = new TossManager();
     const inboxId = message.senderInboxId;
@@ -191,106 +228,17 @@ async function processMessage(
   }
 }
 
-/**
- * Main entry point
- */
-async function main() {
-  // Validate environment
-  const { WALLET_KEY, ENCRYPTION_KEY } = validateEnvironment([
-    "WALLET_KEY",
-    "ENCRYPTION_KEY",
-  ]);
-
-  // For debugging: Create a test transaction reference handler
-  if (process.argv.includes("--test-transaction")) {
-    console.log("🧪 Testing transaction reference processing...");
-    const tossManager = new TossManager();
-    const clients = await initializeClient(processMessage, [
-      {
-        walletKey: WALLET_KEY,
-        encryptionKey: ENCRYPTION_KEY,
-        acceptGroups: true,
-        acceptTypes: ["text", "transactionReference"],
-        networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
-        welcomeMessage: "Welcome to the Toss game! Use /toss to create a new toss or /join to join an existing toss. Use /help for more information.",
-        codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
-      },
-    ]);
-    
-    // Get the first client
-    const client = clients[0];
-    
-    const testReference = {
-      networkId: "0x14a34", // This is the same as in the user's example
-      reference: "0x03bd02d9e6a285e31a3a9f2fc36fcfc5075999d9c98219e4f20890c40bec54e2",
-      // Add custom metadata for testing
-      metadata: {
-        tossId: "1",
-        selectedOption: "heads",
-      }
-    };
-    
-    const testReferenceWithCalls = {
-      networkId: "0x14a34",
-      reference: "0x03bd02d9e6a285e31a3a9f2fc36fcfc5075999d9c98219e4f20890c40bec54e2",
-      calls: [
-        {
-          to: "0xCeC31BE083C9214D1340e224EBc22E327c587b2d",
-          metadata: {
-            tossId: "1",
-            selectedOption: "tails",
-            transactionType: "transfer",
-            currency: "USDC"
-          }
-        }
-      ]
-    };
-    
-    // Create a mock message for testing
-    const mockMessage = {
-      content: testReference,
-      contentType: { typeId: "transactionReference" },
-      senderInboxId: "830d9926b1758299ee1279853c2edc387ebd18ca22ef6bea5d2a74dcbbf0e8ac",
-      conversationId: "test",
-    };
-    
-    // Create a mock conversation for testing
-    const mockConversation = {
-      id: "test",
-      send: async (content: any) => {
-        console.log("Mock conversation response:", content);
-        return "message-id";
-      }
-    };
-    
-    console.log("🧪 Testing with direct metadata");
-    await handleTransactionReference(client, mockConversation as any, mockMessage as any, tossManager);
-    
-    // Modify the mock message to test calls-based metadata
-    const mockMessageWithCalls = {
-      ...mockMessage,
-      content: testReferenceWithCalls
-    };
-    
-    console.log("\n🧪 Testing with calls-based metadata");
-    await handleTransactionReference(client, mockConversation as any, mockMessageWithCalls as any, tossManager);
-    
-    return;
-  }
-
-  // Initialize client
-  await initializeClient(processMessage, [
-    {
-      walletKey: WALLET_KEY,
-      encryptionKey: ENCRYPTION_KEY,
-      acceptGroups: true,
-      acceptTypes: ["text", "transactionReference"],
-      networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
-      welcomeMessage: "Welcome to the Toss game! Use /toss to create a new toss or /join to join an existing toss. Use /help for more information.",
-      codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
-    },
-  ]);
-}
-
-main().catch(console.error);
+const {WALLET_KEY, ENCRYPTION_KEY} = validateEnvironment(["WALLET_KEY", "ENCRYPTION_KEY"]);
+// Initialize client
+await initializeClient(processMessage, [
+  {
+    walletKey: WALLET_KEY,
+    encryptionKey: ENCRYPTION_KEY,
+    acceptGroups: true,
+    acceptTypes: ["text", "transactionReference"],
+    networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
+    welcomeMessage: "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
+    codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
+  },
+]);
 

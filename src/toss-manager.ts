@@ -8,6 +8,11 @@ import { parseNaturalLanguageToss } from "./utils";
 export class TossManager {
   private walletService = new WalletService();
 
+  // Getter for walletService
+  get walletServiceInstance(): WalletService {
+    return this.walletService;
+  }
+
   async getBalance(inboxId: string): Promise<{ address?: string; balance: number }> {
     try {
       return await this.walletService.checkBalance(inboxId);

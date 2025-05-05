@@ -218,7 +218,7 @@ export class WalletService {
   /**
    * Check if an address belongs to a toss wallet and return the corresponding toss ID
    */
-  private async getTossIdFromAddress(address: string): Promise<string | null> {
+  public async getTossIdFromAddress(address: string): Promise<string | null> {
     if (!isAddress(address)) return null;
 
     try {

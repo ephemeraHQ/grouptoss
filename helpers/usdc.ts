@@ -59,6 +59,87 @@ export async function getUSDCBalance(address: string): Promise<string> {
 }
 
 /**
+ * Verify transaction on the blockchain and extract relevant details
+ * @param txHash The transaction hash
+ * @returns Transaction details if successful or null if transaction not found/failed
+ */
+export async function verifyTransaction(txHash: string): Promise<{
+  status: 'success' | 'failed' | 'pending';
+  to: string | null;
+  from: string | null;
+  data: string | null;
+  value: bigint | null;
+  logs?: any[];
+} | null> {
+  try {
+    // Clean the transaction hash
+    const cleanHash = txHash.startsWith('0x') ? txHash : `0x${txHash}`;
+    
+    // Get transaction receipt
+    const receipt = await publicClient.getTransactionReceipt({
+      hash: cleanHash as `0x${string}`,
+    });
+
+    // Get transaction details
+    const transaction = await publicClient.getTransaction({
+      hash: cleanHash as `0x${string}`,
+    });
+
+    // Check if transaction was successful
+    const status = receipt.status === 'success' 
+      ? 'success' 
+      : receipt.status === 'reverted' 
+        ? 'failed' 
+        : 'pending';
+
+    // Extract relevant information
+    return {
+      status,
+      to: transaction.to,
+      from: transaction.from,
+      data: transaction.input,
+      value: transaction.value,
+      logs: receipt.logs,
+    };
+  } catch (error) {
+    console.error('Error verifying transaction:', error);
+    return null;
+  }
+}
+
+/**
+ * Extract token transfer information from transaction data
+ * Specifically for ERC20 token transfers that use the transfer(address,uint256) function
+ * @param txData Transaction input data
+ * @returns Object with recipient address and amount, or null if not a valid transfer
+ */
+export function extractERC20TransferData(txData: string): { 
+  recipient: string; 
+  amount: bigint;
+} | null {
+  try {
+    // Check if this is a standard ERC20 transfer method (0xa9059cbb)
+    if (!txData || !txData.startsWith('0xa9059cbb')) {
+      return null;
+    }
+
+    // Extract recipient address (32 bytes after the method signature)
+    const recipientHex = `0x${txData.slice(10, 74)}`;
+    // Convert to a proper address by taking only the last 40 characters
+    const recipient = `0x${recipientHex.slice(-40)}`;
+
+    // Extract amount (last 32 bytes)
+    const amountHex = `0x${txData.slice(74, 138)}`;
+    const amount = BigInt(amountHex);
+
+    return { recipient, amount };
+  } catch (error) {
+    console.error('Error extracting ERC20 transfer data:', error);
+    return null;
+  }
+}
+
+/**
  * Create wallet send calls parameters for USDC transfer
  */
 export function createUSDCTransferCalls(

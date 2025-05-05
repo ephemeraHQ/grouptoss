@@ -1,4 +1,9 @@
 import {
+  createSigner,
+  getDbPath,
+  getEncryptionKeyFromHex,
+} from "@helpers/client";
+import {
   Client,
   Dm,
   type Conversation,
@@ -6,13 +11,8 @@ import {
   type LogLevel,
   type XmtpEnv,
 } from "@xmtp/node-sdk";
-import {
-  createSigner,
-  getEncryptionKeyFromHex,
-  getDbPath,
-} from "./client";
-
 import "dotenv/config";
+
 /**
  * Configuration options for the XMTP agent
  */
@@ -64,7 +64,6 @@ const DEFAULT_AGENT_OPTIONS: AgentOptions[] = [
     autoReconnect: true,
   },
 ];
-
 
 // Helper functions
 export const sleep = (ms: number): Promise<void> =>
@@ -133,24 +132,27 @@ export const initializeClient = async (
               console.log(`[${env}] Unable to find conversation, skipping`);
               continue;
             }
-           
+
             console.log(
               `[${env}] Received message: ${message.content as string} from ${message.senderInboxId}`,
             );
 
             const isDm = conversation instanceof Dm;
-            if(options.welcomeMessage && isDm) {
-              sendWelcomeMessage(client, conversation, options.welcomeMessage);
+            if (options.welcomeMessage && isDm) {
+              const sent = await sendWelcomeMessage(
+                client,
+                conversation,
+                options.welcomeMessage,
+              );
+              if (sent) {
+                console.log(`[${env}] Welcome message sent, skipping`);
+                continue;
+              }
             }
 
             if (isDm || options.acceptGroups) {
               try {
-                messageHandler(
-                  client,
-                  conversation,
-                  message,
-                  isDm,
-                );
+                await messageHandler(client, conversation, message, isDm);
               } catch (handlerError) {
                 console.error(
                   `[${env}] Error in message handler:`,
@@ -336,22 +338,31 @@ export const initializeClient = async (
   return clients;
 };
 export const logAgentDetails = (clients: Client[]): void => {
-  const clientsByAddress = clients.reduce<Record<string, Client[]>>((acc, client) => {
-    const address = client.accountIdentifier?.identifier ?? "";
-    if (!acc[address]) acc[address] = [];
-    acc[address].push(client);
-    return acc;
-  }, {});
+  const clientsByAddress = clients.reduce<Record<string, Client[]>>(
+    (acc, client) => {
+      const address = client.accountIdentifier?.identifier ?? "";
+      if (!acc[address]) acc[address] = [];
+      acc[address].push(client);
+      return acc;
+    },
+    {},
+  );
 
   for (const [address, clientGroup] of Object.entries(clientsByAddress)) {
     const firstClient = clientGroup[0];
     const inboxId = firstClient.inboxId;
-    const environments = clientGroup.map(c => c.options?.env ?? "dev").join(", ");
-    
+    const environments = clientGroup
+      .map((c) => c.options?.env ?? "dev")
+      .join(", ");
+
     const urls = [
       `http://xmtp.chat/dm/${address}`,
-      ...(environments.includes("dev") ? [`https://preview.convos.org/dm/${inboxId}`] : []),
-      ...(environments.includes("production") ? [`https://convos.org/dm/${inboxId}`] : [])
+      ...(environments.includes("dev")
+        ? [`https://preview.convos.org/dm/${inboxId}`]
+        : []),
+      ...(environments.includes("production")
+        ? [`https://convos.org/dm/${inboxId}`]
+        : []),
     ];
 
     console.log(`
@@ -359,13 +370,17 @@ export const logAgentDetails = (clients: Client[]): void => {
     • Address: ${address}
     • InboxId: ${inboxId}
     • Networks: ${environments}
-    ${urls.map(url => `• URL: ${url}`).join("\n")}`);
+    ${urls.map((url) => `• URL: ${url}`).join("\n")}`);
   }
 };
 
-export const sendWelcomeMessage = async (client: Client, conversation: Conversation,  welcomeMessage: string) => {
-
+export const sendWelcomeMessage = async (
+  client: Client,
+  conversation: Conversation,
+  welcomeMessage: string,
+) => {
   // Get all messages from this conversation
+  await conversation.sync();
   const messages = await conversation.messages();
   // Check if we have sent any messages in this conversation before
   const sentMessagesBefore = messages.filter(
@@ -375,6 +390,7 @@ export const sendWelcomeMessage = async (client: Client, conversation: Conversat
   if (sentMessagesBefore.length === 0) {
     console.log(`Sending welcome message`);
     await conversation.send(welcomeMessage);
-    return;
+    return true;
   }
+  return false;
 };
