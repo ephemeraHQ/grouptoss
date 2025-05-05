@@ -16,10 +16,23 @@ async function createJoinTossWalletSendCalls(
   tossAmount: string, 
   walletAddress: string, 
   senderInboxId: string,
-  option: string
+  option: string,
+  tossManager: TossManager
 ): Promise<{ walletSendCalls: any, memberAddress: string }> {
   // Convert amount to decimals (6 for USDC)
-  const amountInDecimals = Math.floor(parseFloat(tossAmount) * Math.pow(10, 6));
+  let amountInDecimals = Math.floor(parseFloat(tossAmount) * Math.pow(10, 6));
+  
+  // Get the toss to determine available options
+  const toss = await tossManager.getToss(tossId);
+  let isFirstOption = false;
+  let tossOptions = null;
+  
+  if (toss && toss.tossOptions && toss.tossOptions.length > 0) {
+    tossOptions = toss.tossOptions;
+    // Check if this is the first option
+    isFirstOption = toss.tossOptions[0].toLowerCase() === option.toLowerCase();
+    console.log(`Option "${option}" is ${isFirstOption ? 'first' : 'second'} option out of ${tossOptions.join(', ')}`);
+  }
   
   // Get the user's wallet address from their inbox ID
   const inboxState = await client.preferences.inboxStateFromInboxIds([senderInboxId]);
@@ -29,7 +42,10 @@ async function createJoinTossWalletSendCalls(
     throw new Error("Unable to find member address");
   }
   
-  // Create the wallet send calls with option metadata
+  // Create descriptive message for this option
+  const description = `Join Toss #${tossId} with option "${option}" 👇`;
+  
+  // Create the wallet send calls with option metadata - add in multiple places for redundancy
   const walletSendCalls = createUSDCTransferCalls(
     memberAddress,
     walletAddress,
@@ -37,9 +53,14 @@ async function createJoinTossWalletSendCalls(
     // Add metadata about the option selected
     {
       tossId,
-      selectedOption: option
-    }
-    ,"Join with " + option + " 👇 "
+      selectedOption: option,
+      option: option, // Alternative field name
+      choice: option, // Another alternative field name
+      description: `Option: ${option}`, // Include in description too
+      isFirstOption: isFirstOption, // Explicitly indicate if this is the first option
+      tossOptions: tossOptions // Pass all available options
+    },
+    description
   );
   
   return { walletSendCalls, memberAddress };
@@ -122,7 +143,8 @@ export async function handleCommand(
         toss.tossAmount, 
         toss.walletAddress, 
         message.senderInboxId,
-        option1
+        option1,
+        tossManager
       );
       
       await conversation.send(option1SendCall, ContentTypeWalletSendCalls);
@@ -135,7 +157,8 @@ export async function handleCommand(
         toss.tossAmount, 
         toss.walletAddress, 
         message.senderInboxId,
-        option2
+        option2,
+        tossManager
       );
       
       await conversation.send(option2SendCall, ContentTypeWalletSendCalls);

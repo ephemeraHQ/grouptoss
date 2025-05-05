@@ -70,6 +70,11 @@ export async function verifyTransaction(txHash: string): Promise<{
   data: string | null;
   value: bigint | null;
   logs?: any[];
+  metadata?: {
+    selectedOption?: string;
+    tossId?: string;
+    [key: string]: any;
+  };
 } | null> {
   try {
     // Clean the transaction hash
@@ -91,6 +96,90 @@ export async function verifyTransaction(txHash: string): Promise<{
       : receipt.status === 'reverted' 
         ? 'failed' 
         : 'pending';
+    
+    // Try to extract metadata from transaction logs
+    let metadata: { selectedOption?: string; tossId?: string; [key: string]: any } = {};
+    
+    // Look for transaction message (may be added by wallet apps like Coinbase Wallet)
+    // Transaction messages may be in logs or separate data field in some chains
+    try {
+      const messageData = (transaction as any).message || (receipt as any).message;
+      if (messageData) {
+        console.log(`Found transaction message: ${messageData}`);
+        if (typeof messageData === 'string' && messageData.includes('{') && messageData.includes('}')) {
+          try {
+            const jsonData = JSON.parse(messageData);
+            if (jsonData.option) {
+              metadata.selectedOption = jsonData.option;
+            }
+            if (jsonData.tossId) {
+              metadata.tossId = jsonData.tossId;
+            }
+            console.log(`Extracted metadata from transaction message: ${JSON.stringify(metadata)}`);
+          } catch (jsonError) {
+            // Ignore JSON parsing errors
+          }
+        }
+      }
+    } catch (error) {
+      // Ignore any errors when accessing potential message fields
+    }
+    
+    // Look for logs with data that might contain our metadata
+    if (receipt.logs && receipt.logs.length > 0) {
+      for (const log of receipt.logs) {
+        try {
+          if (log.data && log.data !== '0x') {
+            // Try to decode any hex strings that might contain JSON
+            const hexData = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
+            const asciiData = Buffer.from(hexData, 'hex').toString('utf8');
+            
+            // Check if the data contains JSON
+            if (asciiData.includes('{') && asciiData.includes('}')) {
+              try {
+                const jsonStartIndex = asciiData.indexOf('{');
+                const jsonEndIndex = asciiData.lastIndexOf('}') + 1;
+                const jsonString = asciiData.slice(jsonStartIndex, jsonEndIndex);
+                const jsonData = JSON.parse(jsonString);
+                
+                // Look for metadata fields
+                if (jsonData.selectedOption || jsonData.tossId || jsonData.option) {
+                  if (jsonData.option && !metadata.selectedOption) {
+                    metadata.selectedOption = jsonData.option;
+                  }
+                  if (jsonData.selectedOption && !metadata.selectedOption) {
+                    metadata.selectedOption = jsonData.selectedOption;
+                  }
+                  if (jsonData.tossId && !metadata.tossId) {
+                    metadata.tossId = jsonData.tossId;
+                  }
+                  console.log(`Found metadata in transaction log: ${JSON.stringify(metadata)}`);
+                }
+              } catch (jsonError) {
+                // Ignore JSON parsing errors
+              }
+            }
+          }
+        } catch (logError) {
+          // Skip any errors in individual log processing
+        }
+      }
+    }
+    
+    // Check input data for metadata
+    if (transaction.input && transaction.input.length > 0) {
+      // Extract ERC20 transfer and check if there's any metadata encoded
+      const transferData = extractERC20TransferData(transaction.input);
+      if (transferData && transferData.metadata) {
+        // Check if there's any metadata in the transfer data
+        if (transferData.metadata.selectedOption && !metadata.selectedOption) {
+          metadata.selectedOption = transferData.metadata.selectedOption;
+        }
+        if (transferData.metadata.tossId && !metadata.tossId) {
+          metadata.tossId = transferData.metadata.tossId;
+        }
+      }
+    }
 
     // Extract relevant information
     return {
@@ -100,6 +189,7 @@ export async function verifyTransaction(txHash: string): Promise<{
       data: transaction.input,
       value: transaction.value,
       logs: receipt.logs,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined
     };
   } catch (error) {
     console.error('Error verifying transaction:', error);
@@ -116,6 +206,11 @@ export async function verifyTransaction(txHash: string): Promise<{
 export function extractERC20TransferData(txData: string): { 
   recipient: string; 
   amount: bigint;
+  metadata?: {
+    selectedOption?: string;
+    tossId?: string;
+    [key: string]: any;
+  };
 } | null {
   try {
     // Check if this is a standard ERC20 transfer method (0xa9059cbb)
@@ -132,7 +227,13 @@ export function extractERC20TransferData(txData: string): {
     const amountHex = `0x${txData.slice(74, 138)}`;
     const amount = BigInt(amountHex);
 
-    return { recipient, amount };
+    // Try to extract any metadata from the remaining data
+    // For standard ERC20 transfers there isn't any, but we return an empty object to satisfy typing
+    return { 
+      recipient, 
+      amount,
+      metadata: {}  // Default empty metadata
+    };
   } catch (error) {
     console.error('Error extracting ERC20 transfer data:', error);
     return null;
@@ -150,16 +251,70 @@ export function createUSDCTransferCalls(
   description?: string,
 ): WalletSendCallsParams {
   const methodSignature = "0xa9059cbb"; // Function signature for ERC20 'transfer(address,uint256)'
+  
+  // Modify amount to encode option selection directly in the transaction value
+  // This ensures we can always recover the option from the blockchain, even without metadata
+  let amountToSend = amount;
+  
+  // If this is a toss with an option, encode it in the value
+  if (additionalMetadata?.selectedOption) {
+    const selectedOption = additionalMetadata.selectedOption;
+    const tossId = additionalMetadata.tossId;
+    
+    // If we have toss options, use them to determine the encoding
+    if (additionalMetadata.tossOptions && additionalMetadata.tossOptions.length > 0) {
+      const options = additionalMetadata.tossOptions;
+      const optionIndex = options.findIndex(
+        (opt: string) => opt.toLowerCase() === selectedOption.toLowerCase()
+      );
+      
+      if (optionIndex !== -1) {
+        // Add option index + 1 to the amount to encode selection (1-based index)
+        // For first option: add 1, second option: add 2, etc.
+        amountToSend += (optionIndex + 1);
+        console.log(`Encoding option "${selectedOption}" as option #${optionIndex + 1}, adjusted amount: ${amountToSend}`);
+      }
+    } else if (additionalMetadata.isFirstOption !== undefined) {
+      // If isFirstOption is explicitly provided, use it
+      amountToSend += additionalMetadata.isFirstOption ? 1 : 2;
+      console.log(`Encoding explicit option choice (${additionalMetadata.isFirstOption ? 'first' : 'second'}), adjusted amount: ${amountToSend}`);
+    }
+    
+    // Log that we're encoding the option
+    console.log(`Sending ${amountToSend} to encode option "${selectedOption}" for toss ID ${tossId || "unknown"}`);
+  }
 
   // Format the transaction data following ERC20 transfer standard
   const transactionData = `${methodSignature}${recipientAddress
     .slice(2)
-    .padStart(64, "0")}${BigInt(amount).toString(16).padStart(64, "0")}`;
+    .padStart(64, "0")}${BigInt(amountToSend).toString(16).padStart(64, "0")}`;
 
   const config = networks.find((network) => network.networkId === NETWORK_ID);
   if (!config) {
     throw new Error("Network not found");
   }
+  
+  // Create a metadata object with the additional fields
+  const metadata = {
+    description: description ?? `Transfer ${amountToSend / Math.pow(10, config.decimals)} USDC on ${config.networkName}`,
+    transactionType: "transfer",
+    currency: "USDC",
+    amount: amountToSend,
+    decimals: config.decimals,
+    networkId: config.networkId,
+    ...additionalMetadata  // Merge additional metadata if provided
+  };
+  
+  // Add metadata to the message field if selectedOption is present
+  // This helps ensure the option is preserved in the transaction
+  let messageData = null;
+  if (additionalMetadata?.selectedOption) {
+    messageData = {
+      option: additionalMetadata.selectedOption,
+      tossId: additionalMetadata.tossId || "",
+    };
+  }
+  
   const walletSendCalls = {
     version: "1.0",
     from: fromAddress as `0x${string}`,
@@ -168,18 +323,12 @@ export function createUSDCTransferCalls(
       {
         to: config.tokenAddress as `0x${string}`,
         data: transactionData as `0x${string}`,
-        metadata: {
-          description: description ?? `Transfer ${amount / Math.pow(10, config.decimals)} USDC on ${config.networkName}`,
-          transactionType: "transfer",
-          currency: "USDC",
-          amount: amount,
-          decimals: config.decimals,
-          networkId: config.networkId,
-          ...additionalMetadata  // Merge additional metadata if provided
-        },
+        metadata,
       },
       /* add more calls here */
     ],
+    metadata: additionalMetadata, // Also add at top level for redundancy
+    message: messageData ? JSON.stringify(messageData) : undefined, // Add as custom message field
   };
   return walletSendCalls;
 }

@@ -12,6 +12,17 @@ import { verifyTransaction, extractERC20TransferData } from "@helpers/usdc";
 import { checkTransactionWithRetries } from "../helpers/transaction-checker";
 
 /**
+ * Custom JSON stringifier that can handle BigInt values
+ */
+function customJSONStringify(obj: any, space?: number | string): string {
+  return JSON.stringify(obj, (key, value) => 
+    typeof value === 'bigint' 
+      ? value.toString() + 'n' // Append 'n' to distinguish from regular numbers
+      : value
+  , space);
+}
+
+/**
  * Process a transaction reference that might be related to a toss
  */
 async function handleTransactionReference(
@@ -44,6 +55,9 @@ async function handleTransactionReference(
       return;
     }
     
+    // Log full transaction details for debugging
+    console.log(`Complete transaction details: ${customJSONStringify(txDetails, 2)}`);
+    
     // Check if transaction was successful
     if (txDetails.status !== 'success') {
       console.log(`Transaction failed with status: ${txDetails.status}`);
@@ -52,6 +66,52 @@ async function handleTransactionReference(
     }
     
     console.log(`✅ Transaction verified: From ${txDetails.from} to ${txDetails.to}`);
+    
+    // Try to get metadata from various sources
+    let selectedOption = null;
+    
+    // 1. Try to get from transaction metadata
+    if ('metadata' in txDetails && txDetails.metadata) {
+      const meta = txDetails.metadata as { selectedOption?: string };
+      if (meta.selectedOption) {
+        console.log(`Found option in transaction metadata: ${meta.selectedOption}`);
+        selectedOption = meta.selectedOption;
+      }
+    }
+    
+    // 2. Check in the transaction reference itself
+    if (!selectedOption) {
+      // Try the call data from the transaction reference
+      if (txRef.calls && txRef.calls.length > 0) {
+        const callMetadata = txRef.calls[0]?.metadata;
+        if (callMetadata?.selectedOption) {
+          selectedOption = callMetadata.selectedOption;
+          console.log(`Found option in transaction reference call metadata: ${selectedOption}`);
+        }
+      }
+      
+      // Try the direct metadata
+      if (!selectedOption && txRef.metadata?.selectedOption) {
+        selectedOption = txRef.metadata.selectedOption;
+        console.log(`Found option in transaction reference metadata: ${selectedOption}`);
+      }
+    }
+    
+    // 3. Check the message for contextual data 
+    if (!selectedOption) {
+      // Look for option info in the message context
+      const messageContext = message.content as any;
+      if (messageContext?.metadata?.selectedOption) {
+        selectedOption = messageContext.metadata.selectedOption;
+        console.log(`Found option in message context: ${selectedOption}`);
+      }
+      
+      // Check in message extras or any other properties that might contain the data
+      if (!selectedOption && messageContext?.extras?.option) {
+        selectedOption = messageContext.extras.option;
+        console.log(`Found option in message extras: ${selectedOption}`);
+      }
+    }
     
     // Check if this is an ERC20 token transfer
     const transferData = txDetails.data ? extractERC20TransferData(txDetails.data) : null;
@@ -70,16 +130,58 @@ async function handleTransactionReference(
       return;
     }
     
+    // Log the target address for debugging
+    console.log(`📌 Address ${targetAddress} belongs to toss:${tossId}`);
+    
     console.log(`✅ Found toss ID ${tossId} for transaction to ${targetAddress}`);
     
-    // Get metadata (if available) to determine the option selected
-    // First try metadata from txRef
-    let selectedOption = txRef?.metadata?.selectedOption;
+    // 4. Try to infer option from prior choices in the toss
+    if (!selectedOption) {
+      // Get the toss for checking options or prior choices
+      const toss = await tossManager.getToss(tossId);
+      if (toss) {
+        // Try to extract the option from transaction data or existing choices
+        
+        // 4.1 Check if sender has previously joined this toss with an option
+        if (toss.participantOptions) {
+          const existingChoice = toss.participantOptions.find(
+            (pc) => pc.inboxId.toLowerCase() === message.senderInboxId.toLowerCase()
+          );
+          
+          if (existingChoice?.option) {
+            selectedOption = existingChoice.option;
+            console.log(`Found option from existing choice: ${selectedOption}`);
+          }
+        }
+        
+        // 4.2 If there are only two options, try to check the transaction amount to determine which option
+        if (!selectedOption && toss.tossOptions && toss.tossOptions.length > 0 && transferData) {
+          // Calculate the base expected amount (before option encoding)
+          const baseAmount = Math.floor(parseFloat(toss.tossAmount) * Math.pow(10, 6));
+          
+          // Get the actual amount from the transaction
+          const actualAmount = Number(transferData.amount);
+          
+          // Calculate the difference to determine which option was chosen
+          const amountDiff = actualAmount - baseAmount;
+          
+          if (amountDiff > 0 && amountDiff <= toss.tossOptions.length) {
+            // Option is encoded as a 1-based index in the amount
+            // Option 1: baseAmount + 1, Option 2: baseAmount + 2, etc.
+            const optionIndex = amountDiff - 1;
+            if (optionIndex >= 0 && optionIndex < toss.tossOptions.length) {
+              selectedOption = toss.tossOptions[optionIndex];
+              console.log(`Extracted option from transaction amount: option #${optionIndex + 1} = "${selectedOption}"`);
+              console.log(`Transaction amount: ${actualAmount}, Base amount: ${baseAmount}, Diff: ${amountDiff}`);
+            }
+          }
+        }
+      }
+    }
     
-    // Also check call metadata if available
-    const calls = txRef?.calls || [];
-    if (!selectedOption && calls.length > 0) {
-      selectedOption = calls[0]?.metadata?.selectedOption;
+    // Log the selected option if found
+    if (selectedOption) {
+      console.log(`🎮 Selected option for toss ${tossId}: ${selectedOption}`);
     }
     
     // If we still don't have an option, request it from the user

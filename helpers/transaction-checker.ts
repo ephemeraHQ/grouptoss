@@ -27,8 +27,13 @@ export async function checkTransactionWithRetries(
   data: string | null;
   value: bigint | null;
   logs?: any[];
+  metadata?: any;
 } | null> {
   let currentDelay = initialDelay;
+  
+  // Wait before the first check to give the transaction time to be processed
+  console.log(`Waiting ${Math.round(currentDelay / 1000)}s before checking transaction ${txHash}...`);
+  await sleep(currentDelay);
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
