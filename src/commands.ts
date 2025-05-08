@@ -85,13 +85,16 @@ export async function handleCommand(
     const commandParts = commandContent.split(" ");
     const command = commandParts[0].toLowerCase();
 
-    if (["join", "close", "help", "balance"].includes(command)) {
+    if (["join", "close", "help", "balance","status"].includes(command)) {
       return handleExplicitCommand(
         command, 
         commandParts.slice(1), 
         message.senderInboxId, 
         tossManager, 
-        conversationId
+        conversationId,
+        client,
+        conversation,
+        isDm
       );
     }   
     
@@ -108,34 +111,6 @@ export async function handleCommand(
     if (typeof parsedToss === "string") {
       return parsedToss; // Return error message if parsing failed
     }
-    
-    // Use the parsed amount or default to 1 USDC
-    const requiredAmount = parseFloat(parsedToss.amount);
-    
-    // Check if user has sufficient balance
-    const { balance, address:agentAddress } = await tossManager.getBalance(message.senderInboxId);
-    console.log("agentAddress", agentAddress);
-    if (balance < requiredAmount) {
-      const amountInDecimals = Math.floor(requiredAmount * Math.pow(10, 6));
-      const inboxState = await client.preferences.inboxStateFromInboxIds([
-        message.senderInboxId,
-      ]);
-      const memberAddress = inboxState[0].identifiers[0].identifier;
-      if (!memberAddress) {
-        console.log("Unable to find member address, skipping");
-        return "Unable to find member address, skipping";
-      }
-      const walletSendCalls = createUSDCTransferCalls(
-        memberAddress,
-        agentAddress as string,
-        amountInDecimals,
-      );
-      console.log("Replied with wallet sendcall");
-      await conversation.send(`Insufficient USDC balance. You need at least ${requiredAmount} USDC to create a toss.`);
-      await conversation.send(walletSendCalls, ContentTypeWalletSendCalls);
-      return ""
-    }
-  
     // Create toss with conversation ID
     const toss = await tossManager.createGameFromPrompt(
       message.senderInboxId, 
@@ -208,17 +183,85 @@ export async function handleExplicitCommand(
   args: string[],
   inboxId: string,
   tossManager: TossManager,
-  conversationId?: string
+  conversationId?: string,
+  client?: Client,
+  conversation?: Conversation,
+  isDm: boolean
 ): Promise<string> {
   switch (command) {
     case "balance": {
+      if(!isDm) {
+        return "For checking your balance, please DM me.";
+      }
       const { balance, address } = await tossManager.getBalance(inboxId);
       return `Your balance is ${balance} USDC. Your address is ${address}`;
     }
     
-    case "join": {
+    case "status": {
       // No conversationId means we're in a DM, which we don't support for toss
       if (!conversationId) {
+        return "Tosses are only supported in group chats.";
+      }
+      
+      // Get the active toss for this conversation
+      const toss = await tossManager.getActiveTossForConversation(conversationId);
+      if (!toss) {
+        return "No active toss found in this group.";
+      }
+      
+      // Calculate total pot
+      const totalPot = parseFloat(toss.tossAmount) * toss.participants.length;
+      
+      // Count votes for each option
+      const optionVotes: Record<string, number> = {};
+      
+      // Initialize vote counts for all options
+      if (toss.tossOptions && toss.tossOptions.length > 0) {
+        toss.tossOptions.forEach(option => {
+          optionVotes[option] = 0;
+        });
+      } else {
+        // Default to heads/tails if no options
+        optionVotes["heads"] = 0;
+        optionVotes["tails"] = 0;
+      }
+      
+      // Count votes by option
+      if (toss.participantOptions && toss.participantOptions.length > 0) {
+        toss.participantOptions.forEach(participant => {
+          const option = participant.option;
+          optionVotes[option] = (optionVotes[option] || 0) + 1;
+        });
+      }
+      
+      // Build response
+      let response = `📊 Toss Status 📊\n\n`;
+      response += `Topic: "${toss.tossTopic}"\n`;
+      response += `Total Players: ${toss.participants.length}\n`;
+      response += `Toss Amount: ${toss.tossAmount} USDC per player\n`;
+      response += `Total Pot: ${totalPot.toFixed(2)} USDC\n\n`;
+      
+      // Vote distribution
+      response += "Vote Distribution:\n";
+      for (const [option, count] of Object.entries(optionVotes)) {
+        if (count > 0) {
+          // Calculate potential winnings if this option wins
+          const winnersCount = count;
+          const winningsPerPerson = winnersCount > 0 ? totalPot / winnersCount : 0;
+          
+          response += `${option}: ${count} vote${count !== 1 ? 's' : ''}\n`;
+          if (winnersCount > 0) {
+            response += `   If "${option}" wins: ${winningsPerPerson.toFixed(2)} USDC per winner\n`;
+          }
+        }
+      }
+      
+      return response;
+    }
+    
+    case "join": {
+      // No conversationId means we're in a DM, which we don't support for toss
+      if (!conversationId || !client || !conversation) {
         return "Tosses are only supported in group chats.";
       }
       
@@ -229,46 +272,50 @@ export async function handleExplicitCommand(
       }
       
       const tossId = toss.id;
-      const chosenOption = args.length > 0 ? args.join(" ") : null;
       
-      if (!chosenOption) {
-        const options = toss.tossOptions?.length
-          ? toss.tossOptions.join(", ")
-          : "yes, no";
-        return `Please specify your option: @toss join <option>\nAvailable options: ${options}`;
+      // Require two options
+      if (!toss.tossOptions || toss.tossOptions.length !== 2) {
+        return `This toss doesn't have exactly two options.`;
       }
       
-      // Validate the option
-      if (
-        toss.tossOptions &&
-        !toss.tossOptions.some(opt => opt.toLowerCase() === chosenOption.toLowerCase())
-      ) {
-        return `Invalid option: ${chosenOption}. Available options: ${toss.tossOptions.join(", ")}`;
+      try {
+        // Send a message first
+        await conversation.send(`Join Toss #${tossId} by selecting one of the options below:`);
+        
+        // Create and send wallet send call for option 1
+        const option1 = toss.tossOptions[0];
+        const { walletSendCalls: option1SendCall } = await createJoinTossWalletSendCalls(
+          client, 
+          tossId, 
+          toss.tossAmount, 
+          toss.walletAddress, 
+          inboxId,
+          option1,
+          tossManager
+        );
+        
+        await conversation.send(option1SendCall, ContentTypeWalletSendCalls);
+        
+        // Create and send wallet send call for option 2
+        const option2 = toss.tossOptions[1];
+        const { walletSendCalls: option2SendCall } = await createJoinTossWalletSendCalls(
+          client, 
+          tossId, 
+          toss.tossAmount, 
+          toss.walletAddress, 
+          inboxId,
+          option2,
+          tossManager
+        );
+        
+        await conversation.send(option2SendCall, ContentTypeWalletSendCalls);
+        
+        // Return empty string since we've already sent all responses directly
+        return "";
+      } catch (error) {
+        console.error("Error creating wallet send calls:", error);
+        return `Error creating payment options. Please try again.`;
       }
-      
-      // Try to join the toss
-      const joinedToss = await tossManager.joinGame(tossId, inboxId);
-      
-      // Process payment
-      const paymentSuccess = await tossManager.makePayment(inboxId, tossId, toss.tossAmount, chosenOption);
-      if (!paymentSuccess) {
-        return `Payment failed. Please ensure you have enough USDC and try again.`;
-      }
-      
-      // Add player with chosen option
-      const updatedToss = await tossManager.addPlayerToGame(tossId, inboxId, chosenOption, true);
-      const playerId = `P${updatedToss.participants.findIndex(p => p === inboxId) + 1}`;
-      
-      let response = `Successfully joined toss! Payment of ${toss.tossAmount} USDC sent.\nYour Player ID: ${playerId}\nYour Choice: ${chosenOption}\nTotal players: ${updatedToss.participants.length}`;
-
-      if (updatedToss.tossTopic) {
-        response += `\nToss Topic: "${updatedToss.tossTopic}"`;
-        if (updatedToss.tossOptions?.length === 2) {
-          response += `\nOptions: ${updatedToss.tossOptions[0]} or ${updatedToss.tossOptions[1]}`;
-        }
-      }
-
-      return response;
     }
 
     case "close": {

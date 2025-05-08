@@ -8,6 +8,7 @@ import {
 import {
   Client,
   Dm,
+  Group,
   type Conversation,
   type DecodedMessage,
   type LogLevel,
@@ -15,6 +16,7 @@ import {
 } from "@xmtp/node-sdk";
 import "dotenv/config";
 
+import { sendWelcomeMessage, sendGroupWelcomeMessage } from "./xmtp-fun";
 /**
  * Configuration options for the XMTP agent
  */
@@ -36,6 +38,8 @@ interface AgentOptions {
   autoReconnect?: boolean;
   /** Welcome message to send to the conversation */
   welcomeMessage?: string;
+  /** Whether to send a welcome message to the conversation */
+  groupWelcomeMessage?: string;
   /** Codecs to use */
   codecs?: any[];
 }
@@ -142,6 +146,9 @@ export const initializeClient = async (
             );
 
             const isDm = conversation instanceof Dm;
+            const isGroup = conversation instanceof Group;
+            
+            // Handle welcome messages for DMs
             if (options.welcomeMessage && isDm) {
               const sent = await sendWelcomeMessage(
                 client,
@@ -150,6 +157,19 @@ export const initializeClient = async (
               );
               if (sent) {
                 console.log(`[${env}] Welcome message sent, skipping`);
+                continue;
+              }
+            }
+            console.log(options.groupWelcomeMessage,isGroup,options.acceptGroups);
+            // Handle welcome messages for Groups
+            if (options.groupWelcomeMessage && isGroup && options.acceptGroups) {
+              const sent = await sendGroupWelcomeMessage(
+                client,
+                conversation as Group,
+                options.groupWelcomeMessage,
+              );
+              if (sent) {
+                console.log(`[${env}] Group welcome message sent, skipping`);
                 continue;
               }
             }
@@ -342,25 +362,4 @@ export const initializeClient = async (
 
   //await Promise.all(streamPromises);
   return clients;
-};
-
-export const sendWelcomeMessage = async (
-  client: Client,
-  conversation: Conversation,
-  welcomeMessage: string,
-) => {
-  // Get all messages from this conversation
-  await conversation.sync();
-  const messages = await conversation.messages();
-  // Check if we have sent any messages in this conversation before
-  const sentMessagesBefore = messages.filter(
-    (msg) => msg.senderInboxId.toLowerCase() === client.inboxId.toLowerCase(),
-  );
-  // If we haven't sent any messages before, send a welcome message and skip validation for this message
-  if (sentMessagesBefore.length === 0) {
-    console.log(`Sending welcome message`);
-    await conversation.send(welcomeMessage);
-    return true;
-  }
-  return false;
 };

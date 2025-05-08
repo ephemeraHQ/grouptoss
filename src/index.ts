@@ -1,8 +1,7 @@
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { initializeAgent } from "@helpers/cdp";
 import { initializeClient } from "@helpers/xmtp-handler";
-import { validateEnvironment } from "@helpers/client";
-import { AGENT_INSTRUCTIONS, HELP_MESSAGE } from "./constants";
+import { AGENT_INSTRUCTIONS } from "./constants";
 import { extractCommand } from "./utils";
 import { TossManager } from "./toss-manager";
 import { handleCommand } from "./commands";
@@ -301,10 +300,7 @@ async function processMessage(
   isDm: boolean,
 ): Promise<void> {
   try {
-    if(isDm) {
-      console.log("Not a group, skipping");
-      return;
-    }
+    
     // Initialize toss manager
     const tossManager = new TossManager();
     const inboxId = message.senderInboxId;
@@ -346,15 +342,15 @@ async function processMessage(
   }
 }
 
-const {WALLET_KEY, ENCRYPTION_KEY} = validateEnvironment(["WALLET_KEY", "ENCRYPTION_KEY"]);
 // Initialize client
 await initializeClient(processMessage, [
   {
-    walletKey: WALLET_KEY,
+    walletKey: process.env.WALLET_KEY as string,
     acceptGroups: true,
     acceptTypes: ["text", "transactionReference"],
     networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
     welcomeMessage: "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
+    groupWelcomeMessage: "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
     codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
   },
 ]);
