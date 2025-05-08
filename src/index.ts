@@ -351,7 +351,6 @@ const {WALLET_KEY, ENCRYPTION_KEY} = validateEnvironment(["WALLET_KEY", "ENCRYPT
 await initializeClient(processMessage, [
   {
     walletKey: WALLET_KEY,
-    encryptionKey: ENCRYPTION_KEY,
     acceptGroups: true,
     acceptTypes: ["text", "transactionReference"],
     networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],

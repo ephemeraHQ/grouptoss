@@ -1,7 +1,9 @@
 import {
   createSigner,
+  generateEncryptionKeyHex,
   getDbPath,
   getEncryptionKeyFromHex,
+  logAgentDetails,
 } from "@helpers/client";
 import {
   Client,
@@ -21,7 +23,7 @@ interface AgentOptions {
   /** Whether to accept group conversations */
   acceptGroups?: boolean;
   /** Encryption key for the client */
-  encryptionKey: string;
+  dbEncryptionKey?: string;
   /** Networks to connect to (default: ['dev', 'production']) */
   networks?: string[];
   /** Public key of the agent */
@@ -52,18 +54,18 @@ type MessageHandler = (
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 2000;
 const WATCHDOG_RESTART_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const DEFAULT_AGENT_OPTIONS: AgentOptions[] = [
-  {
-    walletKey: "",
-    encryptionKey: "",
-    publicKey: "",
-    acceptGroups: false,
-    acceptTypes: ["text"],
-    networks: ["dev", "production"],
-    connectionTimeout: 30000,
-    autoReconnect: true,
-  },
-];
+const DEFAULT_AGENT_OPTIONS: AgentOptions = {
+  walletKey: "",
+  dbEncryptionKey: process.env.ENCRYPTION_KEY ?? generateEncryptionKeyHex(),
+  publicKey: "",
+  acceptGroups: false,
+  acceptTypes: ["text"],
+  networks: process.env.XMTP_ENV ? [process.env.XMTP_ENV] : ["dev"],
+  connectionTimeout: 30000,
+  autoReconnect: true,
+  welcomeMessage: "",
+  codecs: [],
+};
 
 // Helper functions
 export const sleep = (ms: number): Promise<void> =>
@@ -74,8 +76,14 @@ export const sleep = (ms: number): Promise<void> =>
  */
 export const initializeClient = async (
   messageHandler: MessageHandler,
-  options: AgentOptions[] = DEFAULT_AGENT_OPTIONS,
+  options: AgentOptions[],
 ): Promise<Client[]> => {
+  // Merge default options with the provided options
+  const mergedOptions = options.map((opt) => ({
+    ...DEFAULT_AGENT_OPTIONS,
+    ...opt,
+  }));
+
   /**
    * Core message streaming function with robust error handling
    */
@@ -85,7 +93,7 @@ export const initializeClient = async (
     options: AgentOptions,
     onActivity?: () => void,
   ): Promise<void> => {
-    const env = client.options?.env ?? "undefined";
+    const env = client.options?.env;
     let retryCount = 0;
     const acceptTypes = options.acceptTypes || ["text"];
     let backoffTime = RETRY_DELAY_MS;
@@ -97,10 +105,6 @@ export const initializeClient = async (
         if (retryCount === 0) {
           backoffTime = RETRY_DELAY_MS;
         }
-
-        console.log(
-          `[${env}] Starting message stream... ${retryCount > 0 ? `(attempt ${retryCount + 1}/${MAX_RETRIES})` : ""}`,
-        );
 
         // Notify activity monitor
         if (onActivity) onActivity();
@@ -192,9 +196,7 @@ export const initializeClient = async (
           );
 
           try {
-            await initializeClient(messageHandler, [
-              { ...options, networks: [env] },
-            ]);
+            await initializeClient(messageHandler, [{ ...options }]);
             retryCount = 0; // Reset retry counter after recovery
             continue;
           } catch (fatalError) {
@@ -283,13 +285,17 @@ export const initializeClient = async (
   const clients: Client[] = [];
   const streamPromises: Promise<void>[] = [];
 
-  for (const option of options) {
-    for (const env of option.networks ?? ["dev", "production"]) {
+  for (const option of mergedOptions) {
+    for (const env of option.networks ?? []) {
       try {
         console.log(`[${env}] Initializing client...`);
 
         const signer = createSigner(option.walletKey);
-        const dbEncryptionKey = getEncryptionKeyFromHex(option.encryptionKey);
+        const dbEncryptionKey = getEncryptionKeyFromHex(
+          option.dbEncryptionKey ??
+            process.env.ENCRYPTION_KEY ??
+            generateEncryptionKeyHex(),
+        );
         const loggingLevel = (process.env.LOGGING_LEVEL ?? "off") as LogLevel;
         const signerIdentifier = (await signer.getIdentifier()).identifier;
 
@@ -298,7 +304,7 @@ export const initializeClient = async (
           env: env as XmtpEnv,
           loggingLevel,
           dbPath: getDbPath(`${env}-${signerIdentifier}`),
-          codecs: option.codecs,
+          codecs: option.codecs ?? [],
         });
 
         await client.conversations.sync();
@@ -321,7 +327,7 @@ export const initializeClient = async (
         const streamPromise = streamMessages(
           client,
           messageHandler,
-          { ...option, networks: [env] },
+          { ...option },
           activityTracker,
         );
 
@@ -334,44 +340,8 @@ export const initializeClient = async (
 
   logAgentDetails(clients);
 
-  await Promise.all(streamPromises);
+  //await Promise.all(streamPromises);
   return clients;
-};
-export const logAgentDetails = (clients: Client[]): void => {
-  const clientsByAddress = clients.reduce<Record<string, Client[]>>(
-    (acc, client) => {
-      const address = client.accountIdentifier?.identifier ?? "";
-      if (!acc[address]) acc[address] = [];
-      acc[address].push(client);
-      return acc;
-    },
-    {},
-  );
-
-  for (const [address, clientGroup] of Object.entries(clientsByAddress)) {
-    const firstClient = clientGroup[0];
-    const inboxId = firstClient.inboxId;
-    const environments = clientGroup
-      .map((c) => c.options?.env ?? "dev")
-      .join(", ");
-
-    const urls = [
-      `http://xmtp.chat/dm/${address}`,
-      ...(environments.includes("dev")
-        ? [`https://preview.convos.org/dm/${inboxId}`]
-        : []),
-      ...(environments.includes("production")
-        ? [`https://convos.org/dm/${inboxId}`]
-        : []),
-    ];
-
-    console.log(`
-    ✓ XMTP Client:
-    • Address: ${address}
-    • InboxId: ${inboxId}
-    • Networks: ${environments}
-    ${urls.map((url) => `• URL: ${url}`).join("\n")}`);
-  }
 };
 
 export const sendWelcomeMessage = async (
