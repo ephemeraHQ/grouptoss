@@ -91,7 +91,6 @@ export async function handleCommand(
         commandParts.slice(1), 
         message.senderInboxId, 
         tossManager, 
-        conversationId,
         client,
         conversation,
         isDm
@@ -183,11 +182,11 @@ export async function handleExplicitCommand(
   args: string[],
   inboxId: string,
   tossManager: TossManager,
-  conversationId?: string,
-  client?: Client,
-  conversation?: Conversation,
+  client: Client,
+  conversation: Conversation,
   isDm: boolean
 ): Promise<string> {
+  const conversationId = conversation.id;
   switch (command) {
     case "balance": {
       if(!isDm) {
