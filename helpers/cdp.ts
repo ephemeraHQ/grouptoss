@@ -60,7 +60,7 @@ export async function initializeAgent(inboxId: string, instruction: string) {
     console.log(`Initializing agent for inbox: ${inboxId}`);
 
     const llm = new ChatOpenAI({
-      modelName: "gpt-4o",
+      modelName: "gpt-4.1",
     });
 
     const agentkit = await AgentKit.from({

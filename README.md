@@ -1,6 +1,6 @@
-# XMTP Group Toss Agent
+# grouptoss.base.eth
 
-A simple XMTP agent that creates group tosses based on user messages.
+A simple agent that creates group tosses based on user messages.
 
 ## Features
 
