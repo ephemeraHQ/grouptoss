@@ -15,8 +15,7 @@ import {
   type XmtpEnv,
 } from "@xmtp/node-sdk";
 import "dotenv/config";
-
-import { sendWelcomeMessage, sendGroupWelcomeMessage } from "./xmtp-fun";
+import { sendWelcomeMessage, sendGroupWelcomeMessage } from   "./xmtp-other";
 /**
  * Configuration options for the XMTP agent
  */
