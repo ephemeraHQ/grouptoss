@@ -1,4 +1,6 @@
-import { Client, Conversation, Group } from "@xmtp/node-sdk";
+import { Client, Conversation, DecodedMessage, Group } from "@xmtp/node-sdk";
+import { env } from "process";
+import { AgentOptions } from "./xmtp-handler";
 
 export const sendWelcomeMessage = async (
     client: Client,
@@ -50,4 +52,38 @@ export const sendWelcomeMessage = async (
     }
     return false;
   };
+  
+  export const preMessageHandler = async (
+    client: Client,
+    conversation: Conversation,
+    message: DecodedMessage,
+    isDm: boolean,
+    options: AgentOptions,
+  ) => {
+    // Handle welcome messages for DMs
+    if (options.welcomeMessage && isDm) {
+      const sent = await sendWelcomeMessage(
+        client,
+        conversation,
+        options.welcomeMessage,
+      );
+      if (sent) {
+        console.log(`[${env}] Welcome message sent, skipping`);
+        return true;
+      }
+    }
+    // Handle welcome messages for Groups
+    if (options.groupWelcomeMessage && !isDm && options.acceptGroups) {
+      const sent = await sendGroupWelcomeMessage(
+        client,
+        conversation as Group,
+        options.groupWelcomeMessage,
+      );
+      if (sent) {
+        console.log(`[${env}] Group welcome message sent, skipping`);
+        return true;
+      }
+    }
+    return false;
+  }
   

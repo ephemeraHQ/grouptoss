@@ -52,7 +52,7 @@ export async function initializeAgent(inboxId: string, instruction: string) {
     if (inboxId in agentStore) {
       console.log(`Using existing agent for user: ${inboxId}`);
       const agentConfig = {
-        configurable: { thread_id: `CoinToss Agent for ${inboxId}` },
+        configurable: { thread_id: `Toss Agent for ${inboxId}` },
       };
       return { agent: agentStore[inboxId], config: agentConfig };
     }
@@ -60,7 +60,7 @@ export async function initializeAgent(inboxId: string, instruction: string) {
     console.log(`Initializing agent for inbox: ${inboxId}`);
 
     const llm = new ChatOpenAI({
-      modelName: "gpt-4o",
+      modelName: "gpt-4.1",
     });
 
     const agentkit = await AgentKit.from({
@@ -93,7 +93,7 @@ export async function initializeAgent(inboxId: string, instruction: string) {
     }
 
     const agentConfig = {
-      configurable: { thread_id: `CoinToss Agent for ${inboxId}` },
+      configurable: { thread_id: `Toss Agent for ${inboxId}` },
     };
 
     const agent = createReactAgent({
@@ -325,7 +325,6 @@ export class WalletService {
         destination: destinationAddress,
         gasless: true,
       });
-
       console.log(`⏳ Waiting for transfer to complete...`);
       try {
         await transfer?.wait();

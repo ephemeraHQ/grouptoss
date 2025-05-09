@@ -5,9 +5,11 @@ import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
 import { storage } from "./storage";
 import { parseNaturalLanguageToss } from "./utils";
 import { MAX_USDC_AMOUNT } from "./constants";
+import { Client } from "@xmtp/node-sdk";
 
 export class TossManager {
   private walletService = new WalletService();
+  private client?: Client;
 
   // Getter for walletService
   get walletServiceInstance(): WalletService {
@@ -148,18 +150,29 @@ export class TossManager {
       const toss = await storage.getToss(tossId);
       if (!toss) throw new Error("Toss not found");
 
-      return !!await this.walletService.transfer(
+      console.log(`✅ Recording direct transfer for user ${inboxId} with option ${chosenOption}`);
+      
+      // Create participant record
+      const participant: Participant = {
         inboxId,
-        toss.walletAddress,
-        parseFloat(amount)
-      );
+        option: chosenOption,
+      };
+
+      // Update participants list if not already included
+      if (!toss.participants.includes(inboxId)) {
+        toss.participants.push(inboxId);
+        toss.participantOptions.push(participant);
+        await storage.updateToss(toss);
+      }
+      
+      return true;
     } catch (error) {
       console.error(`❌ Payment error:`, error);
       return false;
     }
   }
 
-  async executeCoinToss(
+  async executeToss(
     tossId: string,
     winningOption: string
   ): Promise<GroupTossName> {
@@ -227,6 +240,8 @@ export class TossManager {
     const totalPot = parseFloat(toss.tossAmount) * toss.participants.length;
     const prizePerWinner = totalPot / winners.length;
     const successfulTransfers: string[] = [];
+    let transactionLink: string | undefined;
+    let transactionHash: string | undefined;
 
     for (const winner of winners) {
       try {
@@ -235,6 +250,7 @@ export class TossManager {
         const winnerWallet = await this.walletService.getWallet(winner.inboxId);
         if (!winnerWallet) continue;
 
+        
         const transfer = await this.walletService.transfer(
           tossWallet.inboxId,
           winnerWallet.agent_address,
@@ -243,11 +259,11 @@ export class TossManager {
 
         if (transfer) {
           successfulTransfers.push(winner.inboxId);
-
-          // Set transaction link from first successful transfer
-          if (!toss.transactionLink) {
+          
+          if (!transactionLink) {
             const transferData = transfer as any;
-            toss.transactionLink = transferData.model?.sponsored_send?.transaction_link;
+            transactionLink = transferData.model?.sponsored_send?.transaction_link;
+            transactionHash = transferData.model?.sponsored_send?.transaction_hash;
           }
         }
       } catch (error) {
@@ -260,6 +276,11 @@ export class TossManager {
     toss.status = successfulTransfers.length > 0 
       ? TossStatus.COMPLETED 
       : TossStatus.CANCELLED;
+    
+    if (transactionLink) {
+      toss.transactionLink = transactionLink;
+      toss.transactionHash = transactionHash;
+    }
     
     await storage.updateToss(toss);
     return toss;
@@ -301,6 +322,7 @@ export class TossManager {
         const participantWallet = await this.walletService.getWallet(participant);
         if (!participantWallet) continue;
 
+      
         // Return their original entry amount
         const transfer = await this.walletService.transfer(
           tossWallet.inboxId,
@@ -315,6 +337,7 @@ export class TossManager {
           if (!toss.transactionLink) {
             const transferData = transfer as any;
             toss.transactionLink = transferData.model?.sponsored_send?.transaction_link;
+            toss.transactionHash = transferData.model?.sponsored_send?.transaction_hash;
           }
         }
       } catch (error) {
@@ -413,5 +436,9 @@ export class TossManager {
    */
   async clearActiveTossForConversation(conversationId: string): Promise<void> {
     await storage.removeGroupTossMapping(conversationId);
+  }
+
+  setClient(client: Client): void {
+    this.client = client;
   }
 } 

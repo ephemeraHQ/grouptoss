@@ -31,6 +31,9 @@ async function handleTransactionReference(
   tossManager: TossManager
 ): Promise<void> {
   try {
+    // Give the tossManager access to the client for getting user addresses
+    tossManager.setClient(client);
+    
     console.log(`📝 Processing transaction reference:`, message.content);
     console.log(`Transaction reference full structure: ${JSON.stringify(message.content, null, 2)}`);
     
@@ -259,7 +262,7 @@ async function processTossJoin(
     
     // Process the join
     try {
-      // Add player with selected option
+      // Add player with selected option - payment already verified via transaction reference
       const updatedToss = await tossManager.addPlayerToGame(
         tossId, 
         message.senderInboxId, 
@@ -271,7 +274,7 @@ async function processTossJoin(
       const playerId = `P${updatedToss.participants.findIndex(p => p === message.senderInboxId) + 1}`;
       
       // Send confirmation
-      let response = `✅ Successfully joined!\nYour Player ID: ${playerId}\nYour Choice: ${selectedOption}\nTotal players: ${updatedToss.participants.length}`;
+      let response = `✅ Successfully joined!\nAmount: ${updatedToss.tossAmount}\nChoice: ${selectedOption}\nTotal players: ${updatedToss.participants.length}`;
       
       if (updatedToss.tossTopic) {
         response += `\nToss Topic: "${updatedToss.tossTopic}"`;
@@ -303,9 +306,13 @@ async function processMessage(
     
     // Initialize toss manager
     const tossManager = new TossManager();
+    // Set the client for direct transfers
+    tossManager.setClient(client);
+    
     const inboxId = message.senderInboxId;
     // Handle transaction references
     if (message.contentType?.typeId === "transactionReference") {
+      await conversation.send("⏳ Thinking...");
       await handleTransactionReference(client, conversation, message, tossManager);
       return;
     }

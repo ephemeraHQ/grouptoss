@@ -2,7 +2,7 @@ import { type createReactAgent } from "@langchain/langgraph/prebuilt";
 import { AgentConfig } from "./types";
 import { HELP_MESSAGE } from "./constants";
 import { TossManager } from "./toss-manager";
-import { createUSDCTransferCalls } from   "./transactions";
+import { createUSDCTransferCalls, sendTransactionReference } from   "./transactions";
 import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { parseNaturalLanguageToss } from "./utils";
@@ -100,7 +100,7 @@ export async function handleCommand(
     // Check if there's already an active toss for this conversation
     const existingToss = await tossManager.getActiveTossForConversation(conversationId);
     if (existingToss) {
-      return `There's already an active toss in this group. Please use or close the current toss before creating a new one.\n\nCurrent Toss: "${existingToss.tossTopic}"\nStatus: ${existingToss.status}\nOptions: ${existingToss.tossOptions?.join(", ") || "heads, tails"}`;
+      return `There's already an active toss in this group. Please use or close the current toss before creating a new one.`;
     }
 
     console.log(`🧠 Processing prompt: "${commandContent}"`);
@@ -234,23 +234,27 @@ export async function handleExplicitCommand(
       }
       
       // Build response
-      let response = `📊 Toss Status 📊\n\n`;
-      response += `Topic: "${toss.tossTopic}"\n`;
+      let response = `${toss.tossTopic} 📊\n\n`;
+      response += `Options: ${toss.tossOptions?.join(", ")}\n`;
       response += `Total Players: ${toss.participants.length}\n`;
+      response += `Creator: ${toss.creator.slice(0, 6)}...\n`;
       response += `Toss Amount: ${toss.tossAmount} USDC per player\n`;
       response += `Total Pot: ${totalPot.toFixed(2)} USDC\n\n`;
       
       // Vote distribution
-      response += "Vote Distribution:\n";
-      for (const [option, count] of Object.entries(optionVotes)) {
-        if (count > 0) {
-          // Calculate potential winnings if this option wins
-          const winnersCount = count;
-          const winningsPerPerson = winnersCount > 0 ? totalPot / winnersCount : 0;
-          
-          response += `${option}: ${count} vote${count !== 1 ? 's' : ''}\n`;
-          if (winnersCount > 0) {
-            response += `   If "${option}" wins: ${winningsPerPerson.toFixed(2)} USDC per winner\n`;
+      if(Object.keys(optionVotes).length > 0) {
+        response += "Vote Distribution:\n";
+
+        for (const [option, count] of Object.entries(optionVotes)) {
+          if (count > 0) {
+            // Calculate potential winnings if this option wins
+            const winnersCount = count;
+            const winningsPerPerson = winnersCount > 0 ? totalPot / winnersCount : 0;
+            
+            response += `${option}: ${count} vote${count !== 1 ? 's' : ''}\n`;
+            if (winnersCount > 0) {
+              response += `   If "${option}" wins: ${winningsPerPerson.toFixed(2)} USDC per winner\n`;
+            }
           }
         }
       }
@@ -279,7 +283,7 @@ export async function handleExplicitCommand(
       
       try {
         // Send a message first
-        await conversation.send(`Join Toss #${tossId} by selecting one of the options below:`);
+        await conversation.send(`Join "${toss.tossTopic}" by selecting one of the options below:`);
         
         // Create and send wallet send call for option 1
         const option1 = toss.tossOptions[0];
@@ -349,6 +353,7 @@ export async function handleExplicitCommand(
       try {
         let closedToss: GroupTossName;
         
+        await conversation.send("⏳ Thinking...");
         if (isForceClose) {
           // Force close and return funds to original participants
           closedToss = await tossManager.forceCloseToss(tossId);
@@ -361,8 +366,11 @@ export async function handleExplicitCommand(
           if (closedToss.paymentSuccess) {
             response += `All participants have been refunded their ${toss.tossAmount} USDC.\n`;
             
-            if (closedToss.transactionLink) {
-              response += `\nTransaction: ${closedToss.transactionLink}`;
+            if(closedToss.transactionHash) {
+              await sendTransactionReference(
+                conversation,
+                closedToss.transactionHash,
+              )
             }
           } else {
             response += "⚠️ Refund distribution failed. Please contact support.";
@@ -371,7 +379,7 @@ export async function handleExplicitCommand(
           return response;
         } else {
           // Regular close with a winning option
-          closedToss = await tossManager.executeCoinToss(tossId, winningOption);
+          closedToss = await tossManager.executeToss(tossId, winningOption);
           
           // Clear the group-to-toss mapping after the toss is closed
           await tossManager.clearActiveTossForConversation(conversationId);
@@ -394,8 +402,11 @@ export async function handleExplicitCommand(
               response += `P${closedToss.participants.findIndex(p => p === winner.inboxId) + 1}\n`;
             });
             
-            if (closedToss.transactionLink) {
-              response += `\nTransaction: ${closedToss.transactionLink}`;
+            if (closedToss.transactionHash) {
+              await sendTransactionReference(
+                conversation,
+                closedToss.transactionHash,
+              )
             }
           } else {
             response += "⚠️ Payment distribution failed. Please contact support.";
@@ -413,5 +424,4 @@ export async function handleExplicitCommand(
       return HELP_MESSAGE;
   }
 }
-
 
