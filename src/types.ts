@@ -53,17 +53,18 @@ export interface GroupTossName {
   creator: string;
   tossAmount: string;
   status: TossStatus;
-  participants: string[]; // Maintaining for backward compatibility
-  participantOptions: Participant[]; // New field to track participant options
-  winner?: string;
+  participants: string[];
+  participantOptions: Participant[];
+  tossOptions?: string[];
+  tossTopic?: string;
   walletAddress: string;
   createdAt: number;
-  tossResult?: string;
-  paymentSuccess?: boolean;
+  tossResult: string;
+  paymentSuccess: boolean;
   transactionLink?: string;
   transactionHash?: string;
-  tossTopic?: string;
-  tossOptions?: string[];
+  failedWinners?: string[];
+  failedRefunds?: string[];
 }
 
 export enum TossStatus {

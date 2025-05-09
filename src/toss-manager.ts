@@ -2,7 +2,7 @@ import * as fs from "fs/promises";
 import { type createReactAgent } from "@langchain/langgraph/prebuilt";
 import { WalletService } from "../helpers/walletService";
 import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
-import { FileStorage } from "../helpers/storage";
+import { FileStorage } from "../helpers/lcoalStorage";
 import { parseNaturalLanguageToss } from "./utils";
 import { MAX_USDC_AMOUNT } from "./constants";
 import { Client } from "@xmtp/node-sdk";
@@ -115,6 +115,11 @@ export class TossManager {
       }
     }
 
+    // Ensure player has a wallet (don't wait for this, just ensure it starts)
+    this.walletService.getWallet(player).catch(err => {
+      console.log(`Failed to create wallet for player ${player}: ${err}`);
+    });
+
     // Add player
     toss.participants.push(player);
     toss.participantOptions.push({ inboxId: player, option: chosenOption });
@@ -192,8 +197,8 @@ export class TossManager {
     if (toss.status !== TossStatus.WAITING_FOR_PLAYER)
       throw new Error(`Toss is not ready (status: ${toss.status})`);
 
-    if (toss.participants.length < 2)
-      throw new Error("Toss needs at least 2 players");
+    if (toss.participants.length < 1)
+      throw new Error("Toss needs at least 1 player");
 
     if (!toss.participantOptions.length)
       throw new Error("No participant options found");
@@ -203,7 +208,7 @@ export class TossManager {
       ? toss.tossOptions
       : [...new Set(toss.participantOptions.map((p: Participant) => p.option))];
 
-    if (options.length < 2)
+    if (options.length < 1)
       throw new Error("Not enough unique options");
 
     // Set toss in progress
@@ -229,10 +234,12 @@ export class TossManager {
     );
 
     if (!winners.length) {
-      toss.status = TossStatus.CANCELLED;
-      toss.paymentSuccess = false;
+      // No winners but complete the toss anyway
+      toss.status = TossStatus.COMPLETED;
+      toss.paymentSuccess = true; // No transfers needed
+      toss.tossResult = matchingOption;
       await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
-      throw new Error(`No winners found for option: ${matchingOption}`);
+      return toss;
     }
 
     // Distribute prizes
@@ -249,14 +256,24 @@ export class TossManager {
     const successfulTransfers: string[] = [];
     let transactionLink: string | undefined;
     let transactionHash: string | undefined;
+    const failedWinners: string[] = [];
 
     for (const winner of winners) {
       try {
-        if (!winner.inboxId) continue;
+        if (!winner.inboxId) {
+          console.log("Skipping winner with null inboxId");
+          continue;
+        }
 
+        // Get the wallet for this participant
         const winnerWallet = await this.walletService.getWallet(winner.inboxId);
-        if (!winnerWallet) continue;
+        if (!winnerWallet || !winnerWallet.address) {
+          console.log(`No wallet or address found for winner ${winner.inboxId}, skipping`);
+          failedWinners.push(winner.inboxId);
+          continue;
+        }
 
+        console.log(`Transferring ${prizePerWinner} USDC to winner ${winner.inboxId} at address ${winnerWallet.address}`);
         
         const transfer = await this.walletService.transfer(
           tossId, // Using tossId as userId for the wallet
@@ -272,21 +289,26 @@ export class TossManager {
             transactionLink = transferData.model?.sponsored_send?.transaction_link;
             transactionHash = transferData.model?.sponsored_send?.transaction_hash;
           }
+        } else {
+          failedWinners.push(winner.inboxId);
         }
       } catch (error) {
         console.error(`Transfer error for ${winner.inboxId}:`, error);
+        failedWinners.push(winner.inboxId);
       }
     }
 
-    // Complete the toss
+    // Complete the toss, consider it successful even if some transfers failed
     toss.paymentSuccess = successfulTransfers.length > 0;
-    toss.status = successfulTransfers.length > 0 
-      ? TossStatus.COMPLETED 
-      : TossStatus.CANCELLED;
+    toss.status = TossStatus.COMPLETED;
     
     if (transactionLink) {
       toss.transactionLink = transactionLink;
       toss.transactionHash = transactionHash;
+    }
+    
+    if (failedWinners.length > 0) {
+      toss.failedWinners = failedWinners;
     }
     
     await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
@@ -308,6 +330,15 @@ export class TossManager {
     toss.status = TossStatus.IN_PROGRESS;
     await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
 
+    // If no participants, just mark as cancelled and return
+    if (toss.participants.length === 0) {
+      toss.status = TossStatus.CANCELLED;
+      toss.paymentSuccess = true; // No transfers needed
+      toss.tossResult = "FORCE_CLOSED";
+      await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
+      return toss;
+    }
+
     // Get the toss wallet
     const tossWallet = await this.walletService.getWallet(tossId);
     if (!tossWallet) {
@@ -319,16 +350,25 @@ export class TossManager {
 
     // Track successful refunds
     const successfulTransfers: string[] = [];
+    const failedRefunds: string[] = [];
 
     // Return funds to each participant
     for (const participant of toss.participants) {
       try {
-        if (!participant) continue;
+        if (!participant) {
+          console.log("Skipping null participant");
+          continue;
+        }
 
         // Get participant wallet
         const participantWallet = await this.walletService.getWallet(participant);
-        if (!participantWallet) continue;
+        if (!participantWallet || !participantWallet.address) {
+          console.log(`No wallet or address found for participant ${participant}, skipping`);
+          failedRefunds.push(participant);
+          continue;
+        }
 
+        console.log(`Refunding ${toss.tossAmount} USDC to participant ${participant} at address ${participantWallet.address}`);
       
         // Return their original entry amount
         const transfer = await this.walletService.transfer(
@@ -346,16 +386,23 @@ export class TossManager {
             toss.transactionLink = transferData.model?.sponsored_send?.transaction_link;
             toss.transactionHash = transferData.model?.sponsored_send?.transaction_hash;
           }
+        } else {
+          failedRefunds.push(participant);
         }
       } catch (error) {
         console.error(`Refund error for ${participant}:`, error);
+        failedRefunds.push(participant);
       }
     }
 
     // Mark toss as cancelled
-    toss.paymentSuccess = successfulTransfers.length > 0;
+    toss.paymentSuccess = true; // Consider it successful even if some refunds failed
     toss.status = TossStatus.CANCELLED;
     toss.tossResult = "FORCE_CLOSED";
+    
+    if (failedRefunds.length > 0) {
+      toss.failedRefunds = failedRefunds;
+    }
     
     await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
     return toss;

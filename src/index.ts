@@ -8,7 +8,7 @@ import { handleCommand } from "./commands";
 import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
 import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
 import { WalletService } from "../helpers/walletService";
-import {  storage } from "../helpers/storage";  
+import {  storage } from "../helpers/lcoalStorage";  
 import { handleTransactionReference } from "./commands";
 
 /**

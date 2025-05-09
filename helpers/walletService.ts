@@ -255,6 +255,11 @@ export class WalletService {
     toAddress: string,
     amount: number
   ): Promise<CoinbaseTransfer | undefined> {
+    if (!toAddress) {
+      console.error(`❌ Invalid destination address: null or undefined`);
+      return undefined;
+    }
+    
     toAddress = toAddress.toLowerCase();
 
     console.log("📤 TRANSFER INITIATED");
