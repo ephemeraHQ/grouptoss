@@ -1,5 +1,38 @@
-import { type createReactAgent } from "@langchain/langgraph/prebuilt";
+import { type createReactAgent } from "@langchain/langgraph/prebuilt";    
 import { type Client, type Conversation, type DecodedMessage } from "@xmtp/node-sdk";
+
+export interface NetworkConfig {
+  tokenAddress: string;
+  chainId: `0x${string}`;
+  decimals: number;
+  networkName: string;
+  networkId: string;
+}
+
+export interface TransactionDetails {
+  status: 'success' | 'failed' | 'pending';
+  to: string | null;
+  from: string | null;
+  data: string | null;
+  value: bigint | null;
+  logs?: any[];
+  metadata?: {
+    selectedOption?: string;
+    tossId?: string;
+    [key: string]: any;
+  };
+}
+
+export interface ERC20TransferData {
+  recipient: string;
+  amount: bigint;
+  metadata?: {
+    selectedOption?: string;
+    tossId?: string;
+    [key: string]: any;
+  };
+}
+
 
 // Interface for parsed JSON response
 export interface TossJsonResponse {
@@ -29,6 +62,7 @@ export interface GroupTossName {
   tossResult?: string;
   paymentSuccess?: boolean;
   transactionLink?: string;
+  transactionHash?: string;
   tossTopic?: string;
   tossOptions?: string[];
 }

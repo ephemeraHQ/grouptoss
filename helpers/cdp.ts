@@ -52,7 +52,7 @@ export async function initializeAgent(inboxId: string, instruction: string) {
     if (inboxId in agentStore) {
       console.log(`Using existing agent for user: ${inboxId}`);
       const agentConfig = {
-        configurable: { thread_id: `CoinToss Agent for ${inboxId}` },
+        configurable: { thread_id: `Toss Agent for ${inboxId}` },
       };
       return { agent: agentStore[inboxId], config: agentConfig };
     }
@@ -93,7 +93,7 @@ export async function initializeAgent(inboxId: string, instruction: string) {
     }
 
     const agentConfig = {
-      configurable: { thread_id: `CoinToss Agent for ${inboxId}` },
+      configurable: { thread_id: `Toss Agent for ${inboxId}` },
     };
 
     const agent = createReactAgent({
@@ -245,8 +245,7 @@ export class WalletService {
   async transfer(
     inboxId: string,
     toAddress: string,
-    amount: number,
-    isDirectTransfer = false
+    amount: number
   ): Promise<CoinbaseTransfer | undefined> {
     toAddress = toAddress.toLowerCase();
 
@@ -259,13 +258,6 @@ export class WalletService {
     if (amount > MAX_USDC_AMOUNT) {
       console.error(`❌ Amount ${amount} exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
       return undefined;
-    }
-
-    // For direct transfers via wallet-send-calls, we skip the wallet retrieval and transfer
-    if (isDirectTransfer) {
-      console.log(`✅ DIRECT TRANSFER via wallet-send-calls (bypassing agent wallet)`);
-      // Return a mock successful transfer object
-      return { success: true } as any;
     }
 
     // Get the source wallet
@@ -333,7 +325,6 @@ export class WalletService {
         destination: destinationAddress,
         gasless: true,
       });
-
       console.log(`⏳ Waiting for transfer to complete...`);
       try {
         await transfer?.wait();

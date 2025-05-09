@@ -2,44 +2,16 @@ import { validateEnvironment } from "@helpers/client";
 import type { WalletSendCallsParams } from "@xmtp/content-type-wallet-send-calls";
 import { createPublicClient, formatUnits, http, toHex } from "viem";
 import { base, baseSepolia } from "viem/chains";
-import { MAX_USDC_AMOUNT } from "./constants";
+import { MAX_USDC_AMOUNT, networks } from "./constants";
+import { Conversation } from "@xmtp/node-sdk";
+import { ContentTypeTransactionReference, TransactionReference } from "@xmtp/content-type-transaction-reference";
+import { NetworkConfig, TransactionDetails, ERC20TransferData } from "./types";
 
-interface NetworkConfig {
-  tokenAddress: string;
-  chainId: `0x${string}`;
-  decimals: number;
-  networkName: string;
-  networkId: string;
-}
 
-interface TransactionDetails {
-  status: 'success' | 'failed' | 'pending';
-  to: string | null;
-  from: string | null;
-  data: string | null;
-  value: bigint | null;
-  logs?: any[];
-  metadata?: {
-    selectedOption?: string;
-    tossId?: string;
-    [key: string]: any;
-  };
-}
-
-interface ERC20TransferData {
-  recipient: string;
-  amount: bigint;
-  metadata?: {
-    selectedOption?: string;
-    tossId?: string;
-    [key: string]: any;
-  };
-}
 
 export class TransactionService {
   private readonly publicClient;
   private readonly networkConfig: NetworkConfig;
-  private readonly networks: NetworkConfig[];
   
   // ERC20 minimal ABI for balance checking
   private readonly erc20Abi = [
@@ -58,25 +30,8 @@ export class TransactionService {
   constructor() {
     const { NETWORK_ID } = validateEnvironment(["NETWORK_ID"]);
     
-    this.networks = [
-      {
-        tokenAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
-        chainId: toHex(84532), // Base Sepolia network ID (84532 in hex)
-        decimals: 6,
-        networkName: "Base Sepolia",
-        networkId: "base-sepolia",
-      },
-      {
-        tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base Mainnet
-        chainId: toHex(8453), // Base Mainnet network ID (8453 in hex)
-        decimals: 6,
-        networkName: "Base Mainnet",
-        networkId: "base-mainnet",
-      },
-    ];
-    
     // Get network configuration
-    const networkConfig = this.networks.find(
+    const networkConfig = networks.find(
       (network) => network.networkId === NETWORK_ID
     );
     
@@ -520,3 +475,24 @@ export const checkTransactionWithRetries = async (
     backoffFactor
   );
 }; 
+
+
+export async function sendTransactionReference(
+  conversation: Conversation,
+  transactionLink: string,
+) { 
+  const networkConfig = networks.find(
+    (network) => network.networkId === process.env.NETWORK_ID
+  );
+  if (!networkConfig) {
+    throw new Error(`Network ID ${process.env.NETWORK_ID} not found`);
+  }
+  const transactionReference : TransactionReference = {
+    networkId: networkConfig.chainId,
+    reference: transactionLink,
+  };
+  console.log(`Transaction link: ${transactionLink}`);
+  console.log(`Sending transaction reference: ${JSON.stringify(transactionReference)}`);
+  await conversation.send(transactionReference, ContentTypeTransactionReference);
+  return true;
+}

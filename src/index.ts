@@ -262,7 +262,7 @@ async function processTossJoin(
     
     // Process the join
     try {
-      // Add player with selected option - use isDirectTransfer=true since transaction already happened
+      // Add player with selected option - payment already verified via transaction reference
       const updatedToss = await tossManager.addPlayerToGame(
         tossId, 
         message.senderInboxId, 
@@ -274,7 +274,7 @@ async function processTossJoin(
       const playerId = `P${updatedToss.participants.findIndex(p => p === message.senderInboxId) + 1}`;
       
       // Send confirmation
-      let response = `✅ Successfully joined!\nYour Player ID: ${playerId}\nYour Choice: ${selectedOption}\nTotal players: ${updatedToss.participants.length}`;
+      let response = `✅ Successfully joined!\nAmount: ${updatedToss.tossAmount}\nChoice: ${selectedOption}\nTotal players: ${updatedToss.participants.length}`;
       
       if (updatedToss.tossTopic) {
         response += `\nToss Topic: "${updatedToss.tossTopic}"`;
@@ -312,6 +312,7 @@ async function processMessage(
     const inboxId = message.senderInboxId;
     // Handle transaction references
     if (message.contentType?.typeId === "transactionReference") {
+      await conversation.send("⏳ Thinking...");
       await handleTransactionReference(client, conversation, message, tossManager);
       return;
     }
