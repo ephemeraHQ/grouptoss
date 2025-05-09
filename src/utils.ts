@@ -22,7 +22,16 @@ export function extractJsonFromResponse(
     return null;
   }
 }
-
+/**
+ * Custom JSON stringifier that can handle BigInt values
+ */
+export function customJSONStringify(obj: any, space?: number | string): string {
+  return JSON.stringify(obj, (key, value) => 
+    typeof value === 'bigint' 
+      ? value.toString() + 'n' // Append 'n' to distinguish from regular numbers
+      : value
+  , space);
+}
 /**
  * Extract command from message content
  */

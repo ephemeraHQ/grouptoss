@@ -1,35 +1,42 @@
 import * as fs from "fs/promises";
 import { type createReactAgent } from "@langchain/langgraph/prebuilt";
-import { WalletService } from "@helpers/cdp";
+import { WalletService } from "../helpers/walletService";
 import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
-import { storage } from "./storage";
+import { FileStorage } from "../helpers/storage";
 import { parseNaturalLanguageToss } from "./utils";
 import { MAX_USDC_AMOUNT } from "./constants";
 import { Client } from "@xmtp/node-sdk";
 
+// Storage categories
+const STORAGE_CATEGORIES = {
+  TOSS: "tosses",
+  GROUP_MAPPING: "tosses/group_mapping"
+};
+
 export class TossManager {
-  private walletService = new WalletService();
+  private walletService: WalletService;
+  private storage: FileStorage;
   private client?: Client;
 
-  // Getter for walletService
-  get walletServiceInstance(): WalletService {
-    return this.walletService;
+  constructor(walletService: WalletService, storage: FileStorage) {
+    this.walletService = walletService;
+    this.storage = storage;
   }
 
-  async getBalance(inboxId: string): Promise<{ address?: string; balance: number }> {
+  async getBalance(userId: string): Promise<{ address?: string; balance: number }> {
     try {
-      return await this.walletService.checkBalance(inboxId);
+      return await this.walletService.checkBalance(userId);
     } catch (error) {
       console.error("Error getting user balance:", error);
       return { balance: 0 };
     }
   }
 
-  async getPlayerWalletAddress(inboxId: string): Promise<string | undefined> {
+  async getPlayerWalletAddress(userId: string): Promise<string | undefined> {
     try {
-      return (await this.walletService.getWallet(inboxId))?.agent_address;
+      return (await this.walletService.getWallet(userId))?.address;
     } catch (error) {
-      console.error(`Error getting wallet address for ${inboxId}:`, error);
+      console.error(`Error getting wallet address for ${userId}:`, error);
       return undefined;
     }
   }
@@ -57,20 +64,20 @@ export class TossManager {
       status: TossStatus.CREATED,
       participants: [],
       participantOptions: [],
-      walletAddress: tossWallet.agent_address,
+      walletAddress: tossWallet.address,
       createdAt: Date.now(),
       tossResult: "",
       paymentSuccess: false,
     };
 
-    await storage.saveToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
     
     // If conversationId is provided, associate this toss with the conversation
     if (conversationId) {
-      await storage.saveGroupTossMapping(conversationId, tossId);
-      console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.agent_address} and linked to group ${conversationId}`);
+      await this.storage.saveData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId, { tossId });
+      console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.address} and linked to group ${conversationId}`);
     } else {
-      console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.agent_address}`);
+      console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.address}`);
     }
     
     return toss;
@@ -82,7 +89,7 @@ export class TossManager {
     chosenOption: string,
     hasPaid: boolean
   ): Promise<GroupTossName> {
-    const toss = await storage.getToss(tossId);
+    const toss = await this.getToss(tossId);
     if (!toss) throw new Error("Toss not found");
 
     if (
@@ -99,7 +106,7 @@ export class TossManager {
     // Validate chosen option
     if (toss.tossOptions?.length) {
       const normalizedOption = chosenOption.toLowerCase();
-      const normalizedAvailableOptions = toss.tossOptions.map(opt => opt.toLowerCase());
+      const normalizedAvailableOptions = toss.tossOptions.map((opt: string) => opt.toLowerCase());
 
       if (!normalizedAvailableOptions.includes(normalizedOption)) {
         throw new Error(
@@ -113,12 +120,12 @@ export class TossManager {
     toss.participantOptions.push({ inboxId: player, option: chosenOption });
     toss.status = TossStatus.WAITING_FOR_PLAYER;
 
-    await storage.updateToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
     return toss;
   }
 
   async joinGame(tossId: string, player: string): Promise<GroupTossName> {
-    const toss = await storage.getToss(tossId);
+    const toss = await this.getToss(tossId);
     if (!toss) throw new Error("Toss not found");
 
     if (
@@ -134,35 +141,35 @@ export class TossManager {
     toss.status = TossStatus.WAITING_FOR_PLAYER;
     
     // Persist changes to storage
-    await storage.updateToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
     return toss;
   }
 
   async makePayment(
-    inboxId: string,
+    userId: string,
     tossId: string,
     amount: string,
     chosenOption: string
   ): Promise<boolean> {
-    console.log(`💸 Processing payment: User ${inboxId}, Toss ${tossId}, Amount ${amount}, Option ${chosenOption}`);
+    console.log(`💸 Processing payment: User ${userId}, Toss ${tossId}, Amount ${amount}, Option ${chosenOption}`);
 
     try {
-      const toss = await storage.getToss(tossId);
+      const toss = await this.getToss(tossId);
       if (!toss) throw new Error("Toss not found");
 
-      console.log(`✅ Recording direct transfer for user ${inboxId} with option ${chosenOption}`);
+      console.log(`✅ Recording direct transfer for user ${userId} with option ${chosenOption}`);
       
       // Create participant record
       const participant: Participant = {
-        inboxId,
+        inboxId: userId,
         option: chosenOption,
       };
 
       // Update participants list if not already included
-      if (!toss.participants.includes(inboxId)) {
-        toss.participants.push(inboxId);
+      if (!toss.participants.includes(userId)) {
+        toss.participants.push(userId);
         toss.participantOptions.push(participant);
-        await storage.updateToss(toss);
+        await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
       }
       
       return true;
@@ -178,7 +185,7 @@ export class TossManager {
   ): Promise<GroupTossName> {
     console.log(`🎲 Executing toss: ${tossId}, winning option: ${winningOption}`);
 
-    const toss = await storage.getToss(tossId);
+    const toss = await this.getToss(tossId);
     if (!toss) throw new Error("Toss not found");
 
     // Validate toss state
@@ -194,37 +201,37 @@ export class TossManager {
     // Get options
     const options = toss.tossOptions?.length
       ? toss.tossOptions
-      : [...new Set(toss.participantOptions.map(p => p.option))];
+      : [...new Set(toss.participantOptions.map((p: Participant) => p.option))];
 
     if (options.length < 2)
       throw new Error("Not enough unique options");
 
     // Set toss in progress
     toss.status = TossStatus.IN_PROGRESS;
-    await storage.updateToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
 
     // Validate winning option
     const matchingOption = options.find(
-      option => option.toLowerCase() === winningOption.toLowerCase()
+      (option: string) => option.toLowerCase() === winningOption.toLowerCase()
     );
 
     if (!matchingOption) {
       toss.status = TossStatus.CANCELLED;
       toss.paymentSuccess = false;
-      await storage.updateToss(toss);
+      await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
       throw new Error(`Invalid winning option: ${winningOption}`);
     }
 
     // Set result and find winners
     toss.tossResult = matchingOption;
     const winners = toss.participantOptions.filter(
-      p => p.option.toLowerCase() === matchingOption.toLowerCase()
+      (p: Participant) => p.option.toLowerCase() === matchingOption.toLowerCase()
     );
 
     if (!winners.length) {
       toss.status = TossStatus.CANCELLED;
       toss.paymentSuccess = false;
-      await storage.updateToss(toss);
+      await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
       throw new Error(`No winners found for option: ${matchingOption}`);
     }
 
@@ -233,7 +240,7 @@ export class TossManager {
     if (!tossWallet) {
       toss.status = TossStatus.CANCELLED;
       toss.paymentSuccess = false;
-      await storage.updateToss(toss);
+      await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
       throw new Error("Toss wallet not found");
     }
 
@@ -252,8 +259,8 @@ export class TossManager {
 
         
         const transfer = await this.walletService.transfer(
-          tossWallet.inboxId,
-          winnerWallet.agent_address,
+          tossId, // Using tossId as userId for the wallet
+          winnerWallet.address,
           prizePerWinner
         );
 
@@ -282,7 +289,7 @@ export class TossManager {
       toss.transactionHash = transactionHash;
     }
     
-    await storage.updateToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
     return toss;
   }
 
@@ -294,19 +301,19 @@ export class TossManager {
   async forceCloseToss(tossId: string): Promise<GroupTossName> {
     console.log(`🚫 Force closing toss: ${tossId}`);
 
-    const toss = await storage.getToss(tossId);
+    const toss = await this.getToss(tossId);
     if (!toss) throw new Error("Toss not found");
 
     // Set toss in progress
     toss.status = TossStatus.IN_PROGRESS;
-    await storage.updateToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
 
     // Get the toss wallet
     const tossWallet = await this.walletService.getWallet(tossId);
     if (!tossWallet) {
       toss.status = TossStatus.CANCELLED;
       toss.paymentSuccess = false;
-      await storage.updateToss(toss);
+      await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
       throw new Error("Toss wallet not found");
     }
 
@@ -325,8 +332,8 @@ export class TossManager {
       
         // Return their original entry amount
         const transfer = await this.walletService.transfer(
-          tossWallet.inboxId,
-          participantWallet.agent_address,
+          tossId, // Using tossId as userId for the wallet
+          participantWallet.address,
           parseFloat(toss.tossAmount)
         );
 
@@ -350,17 +357,18 @@ export class TossManager {
     toss.status = TossStatus.CANCELLED;
     toss.tossResult = "FORCE_CLOSED";
     
-    await storage.updateToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
     return toss;
   }
 
   async getToss(tossId: string): Promise<GroupTossName | null> {
-    return storage.getToss(tossId);
+    return this.storage.getData<GroupTossName>(STORAGE_CATEGORIES.TOSS, tossId);
   }
 
   async getLastIdToss(): Promise<number> {
     try {
-      const files = await fs.readdir(storage.getTossStorageDir());
+      const tossDir = `.data/${STORAGE_CATEGORIES.TOSS}`;
+      const files = await fs.readdir(tossDir);
       const tossFiles = files.filter(file => file.endsWith(".json") && !isNaN(Number(file.split("-")[0])));
 
       if (tossFiles.length === 0) return 0;
@@ -397,7 +405,7 @@ export class TossManager {
     toss.tossOptions = parsedToss.options;
 
     // Update storage
-    await storage.updateToss(toss);
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, toss.id, toss);
     return toss;
   }
 
@@ -407,14 +415,14 @@ export class TossManager {
    * @returns The active toss ID or null if none exists
    */
   async getActiveTossForConversation(conversationId: string): Promise<GroupTossName | null> {
-    const tossId = await storage.getGroupTossMapping(conversationId);
-    if (!tossId) return null;
+    const mapping = await this.storage.getData<{ tossId: string }>(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId);
+    if (!mapping) return null;
     
-    const toss = await this.getToss(tossId);
+    const toss = await this.getToss(mapping.tossId);
     
     // If toss is completed or cancelled, remove the mapping
     if (toss && [TossStatus.COMPLETED, TossStatus.CANCELLED].includes(toss.status)) {
-      await storage.removeGroupTossMapping(conversationId);
+      await this.storage.deleteData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId);
       return null;
     }
     
@@ -427,7 +435,7 @@ export class TossManager {
    * @param tossId The toss ID to set as active
    */
   async setActiveTossForConversation(conversationId: string, tossId: string): Promise<void> {
-    await storage.saveGroupTossMapping(conversationId, tossId);
+    await this.storage.saveData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId, { tossId });
   }
   
   /**
@@ -435,7 +443,7 @@ export class TossManager {
    * @param conversationId The conversation ID
    */
   async clearActiveTossForConversation(conversationId: string): Promise<void> {
-    await storage.removeGroupTossMapping(conversationId);
+    await this.storage.deleteData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId);
   }
 
   setClient(client: Client): void {

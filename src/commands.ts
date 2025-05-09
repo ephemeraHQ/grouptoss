@@ -1,15 +1,16 @@
 import { type createReactAgent } from "@langchain/langgraph/prebuilt";
-import { AgentConfig } from "./types";
+import { AgentConfig, GroupTossName, Participant } from "./types";
 import { HELP_MESSAGE } from "./constants";
 import { TossManager } from "./toss-manager";
-import { createUSDCTransferCalls, sendTransactionReference } from   "./transactions";
+import { checkTransactionWithRetries, createUSDCTransferCalls, extractERC20TransferData, sendTransactionReference } from "./transactions";
 import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
-import { parseNaturalLanguageToss } from "./utils";
-import { GroupTossName, Participant } from "./types";
+import { storage } from "../helpers/storage";
+
+// Wallet operations ----------------------------------------
 
 /**
- * Create wallet send calls buttons for joining a toss with specific options
+ * Create wallet send calls buttons for joining a toss
  */
 async function createJoinTossWalletSendCalls(
   client: Client,
@@ -20,46 +21,32 @@ async function createJoinTossWalletSendCalls(
   option: string,
   tossManager: TossManager
 ): Promise<{ walletSendCalls: any, memberAddress: string }> {
-  // Convert amount to decimals (6 for USDC)
-  let amountInDecimals = Math.floor(parseFloat(tossAmount) * Math.pow(10, 6));
+  const amountInDecimals = Math.floor(parseFloat(tossAmount) * Math.pow(10, 6));
   
-  // Get the toss to determine available options
+  // Get toss data and determine option position
   const toss = await tossManager.getToss(tossId);
-  let isFirstOption = false;
-  let tossOptions = null;
+  const isFirstOption = toss?.tossOptions?.[0]?.toLowerCase() === option.toLowerCase();
   
-  if (toss && toss.tossOptions && toss.tossOptions.length > 0) {
-    tossOptions = toss.tossOptions;
-    // Check if this is the first option
-    isFirstOption = toss.tossOptions[0].toLowerCase() === option.toLowerCase();
-    console.log(`Option "${option}" is ${isFirstOption ? 'first' : 'second'} option out of ${tossOptions.join(', ')}`);
-  }
-  
-  // Get the user's wallet address from their inbox ID
+  // Get the user's wallet address from inbox ID
   const inboxState = await client.preferences.inboxStateFromInboxIds([senderInboxId]);
   const memberAddress = inboxState[0].identifiers[0].identifier;
   
-  if (!memberAddress) {
-    throw new Error("Unable to find member address");
-  }
+  if (!memberAddress) throw new Error("Unable to find member address");
   
-  // Create descriptive message for this option
+  // Create the wallet send calls with option metadata
   const description = `Join Toss #${tossId} with option "${option}" 👇`;
-  
-  // Create the wallet send calls with option metadata - add in multiple places for redundancy
   const walletSendCalls = createUSDCTransferCalls(
     memberAddress,
     walletAddress,
     amountInDecimals,
-    // Add metadata about the option selected
     {
       tossId,
       selectedOption: option,
-      option: option, // Alternative field name
-      choice: option, // Another alternative field name
-      description: `Option: ${option} 👇`, // Include in description too
-      isFirstOption: isFirstOption, // Explicitly indicate if this is the first option
-      tossOptions: tossOptions // Pass all available options
+      option,
+      choice: option,
+      description: `Option: ${option} 👇`,
+      isFirstOption,
+      tossOptions: toss?.tossOptions
     },
     description
   );
@@ -67,8 +54,10 @@ async function createJoinTossWalletSendCalls(
   return { walletSendCalls, memberAddress };
 }
 
+// Command handling ----------------------------------------
+
 /**
- * Entry point for command processing
+ * Main entry point for command processing
  */
 export async function handleCommand(
   client: Client,
@@ -85,7 +74,8 @@ export async function handleCommand(
     const commandParts = commandContent.split(" ");
     const command = commandParts[0].toLowerCase();
 
-    if (["join", "close", "help", "balance","status"].includes(command)) {
+    // Handle explicit commands
+    if (["join", "close", "help", "balance", "status"].includes(command)) {
       return handleExplicitCommand(
         command, 
         commandParts.slice(1), 
@@ -95,9 +85,9 @@ export async function handleCommand(
         conversation,
         isDm
       );
-    }   
+    }
     
-    // Check if there's already an active toss for this conversation
+    // Check for existing active toss
     const existingToss = await tossManager.getActiveTossForConversation(conversationId);
     if (existingToss) {
       return `There's already an active toss in this group. Please use or close the current toss before creating a new one.`;
@@ -105,12 +95,7 @@ export async function handleCommand(
 
     console.log(`🧠 Processing prompt: "${commandContent}"`);
     
-    // Parse the toss to get the required amount
-    const parsedToss = await parseNaturalLanguageToss(agent, agentConfig, commandContent);
-    if (typeof parsedToss === "string") {
-      return parsedToss; // Return error message if parsing failed
-    }
-    // Create toss with conversation ID
+    // Create toss from prompt
     const toss = await tossManager.createGameFromPrompt(
       message.senderInboxId, 
       commandContent, 
@@ -119,63 +104,58 @@ export async function handleCommand(
       conversationId
     );
     
-    // Send initial response about toss creation
+    // Send toss creation confirmation
     const responseText = `🎲 Toss Created! 🎲\n\nTopic: "${toss.tossTopic}"\n${
       toss.tossOptions?.length === 2 ? `Options: ${toss.tossOptions[0]} or ${toss.tossOptions[1]}\n` : ''
     }Toss Amount: ${toss.tossAmount} USDC\n\nTo join, select an option below:`;
     
     await conversation.send(responseText);
     
-    // If we have exactly two options, send wallet send calls for both options
+    // Send option buttons if there are exactly two options
     if (toss.tossOptions?.length === 2) {
-      // Create and send wallet send call for option 1
-      try {
-        const option1 = toss.tossOptions[0];
-        const { walletSendCalls: option1SendCall } = await createJoinTossWalletSendCalls(
-          client, 
-          toss.id, 
-          toss.tossAmount, 
-          toss.walletAddress, 
-          message.senderInboxId,
-          option1,
-          tossManager
-        );
-        
-        await conversation.send(option1SendCall, ContentTypeWalletSendCalls);
-        
-        // Create and send wallet send call for option 2
-        const option2 = toss.tossOptions[1];
-        const { walletSendCalls: option2SendCall } = await createJoinTossWalletSendCalls(
-          client, 
-          toss.id, 
-          toss.tossAmount, 
-          toss.walletAddress, 
-          message.senderInboxId,
-          option2,
-          tossManager
-        );
-        
-        await conversation.send(option2SendCall, ContentTypeWalletSendCalls);
-        
-      } catch (error) {
-        console.error("Error creating wallet send calls:", error);
-        await conversation.send("Error creating join options. Please try again.");
-      }
+      await sendJoinOptions(client, conversation, toss, message.senderInboxId, tossManager);
     } else {
-      // If we don't have exactly 2 options, instruct to use the text command
       await conversation.send("You can join by using the command: @toss join <option>");
     }
     
-    // Return empty string since we've already sent all responses
-    return "";
-
+    return ""; // Empty string since we've sent responses directly
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
 }
 
 /**
- * Handle explicit commands (join, close, help)
+ * Send join options as wallet send calls buttons
+ */
+async function sendJoinOptions(
+  client: Client,
+  conversation: Conversation,
+  toss: GroupTossName,
+  senderInboxId: string,
+  tossManager: TossManager
+): Promise<void> {
+  try {
+    for (const option of toss.tossOptions || []) {
+      const { walletSendCalls } = await createJoinTossWalletSendCalls(
+        client, 
+        toss.id, 
+        toss.tossAmount, 
+        toss.walletAddress, 
+        senderInboxId,
+        option,
+        tossManager
+      );
+      
+      await conversation.send(walletSendCalls, ContentTypeWalletSendCalls);
+    }
+  } catch (error) {
+    console.error("Error creating wallet send calls:", error);
+    await conversation.send("Error creating join options. Please try again.");
+  }
+}
+
+/**
+ * Handle explicit commands (join, close, help, balance, status)
  */
 export async function handleExplicitCommand(
   command: string,
@@ -187,233 +167,74 @@ export async function handleExplicitCommand(
   isDm: boolean
 ): Promise<string> {
   const conversationId = conversation.id;
+  
   switch (command) {
     case "balance": {
-      if(!isDm) {
-        return "For checking your balance, please DM me.";
-      }
+      if (!isDm) return "For checking your balance, please DM me.";
       const { balance, address } = await tossManager.getBalance(inboxId);
       return `Your balance is ${balance} USDC. Your address is ${address}`;
     }
     
     case "status": {
-      // No conversationId means we're in a DM, which we don't support for toss
-      if (!conversationId) {
-        return "Tosses are only supported in group chats.";
-      }
+      if (!conversationId) return "Tosses are only supported in group chats.";
       
-      // Get the active toss for this conversation
       const toss = await tossManager.getActiveTossForConversation(conversationId);
-      if (!toss) {
-        return "No active toss found in this group.";
-      }
+      if (!toss) return "No active toss found in this group.";
       
-      // Calculate total pot
-      const totalPot = parseFloat(toss.tossAmount) * toss.participants.length;
-      
-      // Count votes for each option
-      const optionVotes: Record<string, number> = {};
-      
-      // Initialize vote counts for all options
-      if (toss.tossOptions && toss.tossOptions.length > 0) {
-        toss.tossOptions.forEach(option => {
-          optionVotes[option] = 0;
-        });
-      } else {
-        // Default to heads/tails if no options
-        optionVotes["heads"] = 0;
-        optionVotes["tails"] = 0;
-      }
-      
-      // Count votes by option
-      if (toss.participantOptions && toss.participantOptions.length > 0) {
-        toss.participantOptions.forEach(participant => {
-          const option = participant.option;
-          optionVotes[option] = (optionVotes[option] || 0) + 1;
-        });
-      }
-      
-      // Build response
-      let response = `${toss.tossTopic} 📊\n\n`;
-      response += `Options: ${toss.tossOptions?.join(", ")}\n`;
-      response += `Total Players: ${toss.participants.length}\n`;
-      response += `Creator: ${toss.creator.slice(0, 6)}...\n`;
-      response += `Toss Amount: ${toss.tossAmount} USDC per player\n`;
-      response += `Total Pot: ${totalPot.toFixed(2)} USDC\n\n`;
-      
-      // Vote distribution
-      if(Object.keys(optionVotes).length > 0) {
-        response += "Vote Distribution:\n";
-
-        for (const [option, count] of Object.entries(optionVotes)) {
-          if (count > 0) {
-            // Calculate potential winnings if this option wins
-            const winnersCount = count;
-            const winningsPerPerson = winnersCount > 0 ? totalPot / winnersCount : 0;
-            
-            response += `${option}: ${count} vote${count !== 1 ? 's' : ''}\n`;
-            if (winnersCount > 0) {
-              response += `   If "${option}" wins: ${winningsPerPerson.toFixed(2)} USDC per winner\n`;
-            }
-          }
-        }
-      }
-      
-      return response;
+      return formatTossStatus(toss);
     }
     
     case "join": {
-      // No conversationId means we're in a DM, which we don't support for toss
-      if (!conversationId || !client || !conversation) {
-        return "Tosses are only supported in group chats.";
-      }
+      if (!conversationId) return "Tosses are only supported in group chats.";
       
-      // Get the active toss for this conversation
       const toss = await tossManager.getActiveTossForConversation(conversationId);
-      if (!toss) {
-        return "No active toss found in this group. Start one with '@toss <topic>'";
-      }
+      if (!toss) return "No active toss found in this group. Start one with '@toss <topic>'";
       
-      const tossId = toss.id;
-      
-      // Require two options
       if (!toss.tossOptions || toss.tossOptions.length !== 2) {
         return `This toss doesn't have exactly two options.`;
       }
       
-      try {
-        // Send a message first
-        await conversation.send(`Join "${toss.tossTopic}" by selecting one of the options below:`);
-        
-        // Create and send wallet send call for option 1
-        const option1 = toss.tossOptions[0];
-        const { walletSendCalls: option1SendCall } = await createJoinTossWalletSendCalls(
-          client, 
-          tossId, 
-          toss.tossAmount, 
-          toss.walletAddress, 
-          inboxId,
-          option1,
-          tossManager
-        );
-        
-        await conversation.send(option1SendCall, ContentTypeWalletSendCalls);
-        
-        // Create and send wallet send call for option 2
-        const option2 = toss.tossOptions[1];
-        const { walletSendCalls: option2SendCall } = await createJoinTossWalletSendCalls(
-          client, 
-          tossId, 
-          toss.tossAmount, 
-          toss.walletAddress, 
-          inboxId,
-          option2,
-          tossManager
-        );
-        
-        await conversation.send(option2SendCall, ContentTypeWalletSendCalls);
-        
-        // Return empty string since we've already sent all responses directly
-        return "";
-      } catch (error) {
-        console.error("Error creating wallet send calls:", error);
-        return `Error creating payment options. Please try again.`;
-      }
+      await conversation.send(`Join "${toss.tossTopic}" by selecting one of the options below:`);
+      await sendJoinOptions(client, conversation, toss, inboxId, tossManager);
+      return "";
     }
 
     case "close": {
-      // No conversationId means we're in a DM, which we don't support for toss
-      if (!conversationId) {
-        return "Tosses are only supported in group chats.";
-      }
+      if (!conversationId) return "Tosses are only supported in group chats.";
       
-      // Get the active toss for this conversation
       const toss = await tossManager.getActiveTossForConversation(conversationId);
-      if (!toss) {
-        return "No active toss found in this group.";
-      }
+      if (!toss) return "No active toss found in this group.";
       
-      const tossId = toss.id;
+      if (inboxId !== toss.creator) return "Only the toss creator can close the toss.";
+      
       const winningOption = args.length > 0 ? args.join(" ") : null;
-      
-      // Check if user is the creator
-      if (inboxId !== toss.creator) {
-        return "Only the toss creator can close the toss.";
-      }
-      
-      // Check if force close is requested (no winning option provided)
       const isForceClose = !winningOption;
       
-      // Check if there are enough players for a regular close
       if (toss.participants.length < 2 && !isForceClose) {
         return "Not enough participants to determine a winner. To force close and return funds, use '@toss close' without specifying an option.";
       }
       
-      // Execute the toss with the specified winning option or force close
+      await conversation.send("⏳ Thinking...");
+      
       try {
         let closedToss: GroupTossName;
         
-        await conversation.send("⏳ Thinking...");
         if (isForceClose) {
-          // Force close and return funds to original participants
-          closedToss = await tossManager.forceCloseToss(tossId);
-          
-          // Clear the group-to-toss mapping after the toss is closed
-          await tossManager.clearActiveTossForConversation(conversationId);
-          
-          let response = `🚫 Toss force closed by creator!\n\n`;
-          
-          if (closedToss.paymentSuccess) {
-            response += `All participants have been refunded their ${toss.tossAmount} USDC.\n`;
-            
-            if(closedToss.transactionHash) {
-              await sendTransactionReference(
-                conversation,
-                closedToss.transactionHash,
-              )
-            }
-          } else {
-            response += "⚠️ Refund distribution failed. Please contact support.";
-          }
-          
-          return response;
+          closedToss = await tossManager.forceCloseToss(toss.id);
         } else {
-          // Regular close with a winning option
-          closedToss = await tossManager.executeToss(tossId, winningOption);
-          
-          // Clear the group-to-toss mapping after the toss is closed
-          await tossManager.clearActiveTossForConversation(conversationId);
-          
-          // Format winners
-          const winnerEntries = closedToss.participantOptions
-            .filter((p: Participant) => p.option.toLowerCase() === winningOption.toLowerCase());
-          
-          const totalPot = parseFloat(closedToss.tossAmount) * closedToss.participants.length;
-          const prizePerWinner = totalPot / winnerEntries.length;
-          
-          let response = `🏆 Toss closed! Result: "${winningOption}"\n\n`;
-          
-          if (closedToss.paymentSuccess) {
-            response += `${winnerEntries.length} winner(s)${winnerEntries.length > 0 ? ` with option "${winningOption}"` : ""}\n`;
-            response += `Prize per winner: ${prizePerWinner.toFixed(2)} USDC\n\n`;
-            response += "Winners:\n";
-            
-            winnerEntries.forEach((winner: Participant) => {
-              response += `P${closedToss.participants.findIndex(p => p === winner.inboxId) + 1}\n`;
-            });
-            
-            if (closedToss.transactionHash) {
-              await sendTransactionReference(
-                conversation,
-                closedToss.transactionHash,
-              )
-            }
-          } else {
-            response += "⚠️ Payment distribution failed. Please contact support.";
-          }
-          
-          return response;
+          closedToss = await tossManager.executeToss(toss.id, winningOption);
         }
+        
+        // Clear the group-to-toss mapping
+        await tossManager.clearActiveTossForConversation(conversationId);
+        
+        const response = formatTossResult(closedToss, winningOption, isForceClose);
+        
+        if (closedToss.transactionHash) {
+          await sendTransactionReference(conversation, closedToss.transactionHash);
+        }
+        
+        return response;
       } catch (error) {
         return `Error closing toss: ${error instanceof Error ? error.message : String(error)}`;
       }
@@ -425,3 +246,292 @@ export async function handleExplicitCommand(
   }
 }
 
+// Transaction handling ----------------------------------------
+
+/**
+ * Process a transaction reference that might be related to a toss
+ */
+export async function handleTransactionReference(
+  client: Client,
+  conversation: Conversation,
+  message: DecodedMessage,
+  tossManager: TossManager
+): Promise<void> {
+  try {
+    tossManager.setClient(client);
+    
+    console.log(`📝 Processing transaction reference:`, message.content);
+    
+    // Extract transaction data
+    const txRef = message.content as any;
+    const txHash = txRef?.reference;
+    if (!txHash) return;
+    
+    console.log(`🔍 Verifying transaction: ${txHash}`);
+    const txDetails = await checkTransactionWithRetries(txHash);
+    if (!txDetails) {
+      await conversation.send("⚠️ Could not verify the transaction. It may be pending or not yet indexed.");
+      return;
+    }
+    
+    // Check transaction status
+    if (txDetails.status !== 'success') {
+      await conversation.send(`⚠️ Transaction ${txHash} failed or is still pending.`);
+      return;
+    }
+    
+    // Extract option and toss information
+    const selectedOption = extractSelectedOption(txRef, txDetails, message);
+    const tossData = await extractTossData(txDetails, storage);
+    
+    if (!tossData.tossId) return;
+    
+    // Verify this transaction is for the active toss in this conversation
+    const activeToss = await tossManager.getActiveTossForConversation(conversation.id);
+    if (activeToss && activeToss.id !== tossData.tossId) {
+      await conversation.send(`⚠️ This payment is for a different toss than the one active in this conversation.`);
+      return;
+    }
+    
+    // If no option found, ask user to select one
+    if (!selectedOption) {
+      await promptForOptionSelection(conversation, tossManager, tossData.tossId);
+      return;
+    }
+    
+    // Process the join
+    await processTossJoin(client, conversation, message, tossManager, tossData.tossId, selectedOption, txDetails);
+    
+  } catch (error) {
+    console.error("Error handling transaction reference:", error);
+    try {
+      await conversation.send("⚠️ An error occurred while processing your transaction.");
+    } catch (sendError) {
+      console.error("Failed to send error message:", sendError);
+    }
+  }
+}
+
+/**
+ * Extract selected option from transaction data
+ */
+function extractSelectedOption(txRef: any, txDetails: any, message: DecodedMessage): string | null {
+  // Try to find option in transaction metadata
+  if (txDetails.metadata?.selectedOption) {
+    return txDetails.metadata.selectedOption;
+  }
+  
+  // Try transaction reference call metadata
+  if (txRef.calls?.[0]?.metadata?.selectedOption) {
+    return txRef.calls[0].metadata.selectedOption;
+  }
+  
+  // Try direct metadata
+  if (txRef.metadata?.selectedOption) {
+    return txRef.metadata.selectedOption;
+  }
+  
+  // Try message context
+  const messageContext = message.content as any;
+  if (messageContext?.metadata?.selectedOption) {
+    return messageContext.metadata.selectedOption;
+  }
+  
+  // Try message extras
+  if (messageContext?.extras?.option) {
+    return messageContext.extras.option;
+  }
+  
+  return null;
+}
+
+/**
+ * Extract toss data from transaction details
+ */
+async function extractTossData(txDetails: any, storage: any): Promise<{tossId: string | null, targetAddress: string | null}> {
+  // Get recipient address
+  const transferData = txDetails.data ? extractERC20TransferData(txDetails.data) : null;
+  const targetAddress = transferData?.recipient || txDetails.to;
+  
+  if (!targetAddress) {
+    console.log("Could not determine transaction recipient");
+    return {tossId: null, targetAddress: null};
+  }
+  
+  // Find toss ID by wallet address
+  const walletByAddress = await storage.getWalletByAddress(targetAddress);
+  const tossId = walletByAddress?.userId;
+  
+  if (tossId) {
+    console.log(`📌 Address ${targetAddress} belongs to toss:${tossId}`);
+  }
+  
+  return {tossId, targetAddress};
+}
+
+/**
+ * Prompt user to select an option
+ */
+async function promptForOptionSelection(
+  conversation: Conversation, 
+  tossManager: TossManager, 
+  tossId: string
+): Promise<void> {
+  const toss = await tossManager.getToss(tossId);
+  if (!toss) return;
+  
+  const options = toss.tossOptions && toss.tossOptions.length > 0 
+    ? toss.tossOptions 
+    : ["heads", "tails"];
+  
+  await conversation.send(
+    `✅ Payment received! Please choose one of the following options: ${options.join(", ")}\n` +
+    `Reply with "@toss join <your choice>" to confirm your selection.`
+  );
+}
+
+/**
+ * Process a toss join after receiving transaction reference
+ */
+export async function processTossJoin(
+  client: Client,
+  conversation: Conversation,
+  message: DecodedMessage,
+  tossManager: TossManager,
+  tossId: string,
+  selectedOption: string,
+  txDetails: any
+): Promise<void> {
+  try {
+    const toss = await tossManager.getToss(tossId);
+    if (!toss) {
+      await conversation.send(`⚠️ Toss not found. Your payment might have been received but couldn't be associated with a valid toss.`);
+      return;
+    }
+    
+    // Associate toss with conversation if needed
+    const activeToss = await tossManager.getActiveTossForConversation(conversation.id);
+    if (!activeToss) {
+      await tossManager.setActiveTossForConversation(conversation.id, tossId);
+    }
+    
+    // Add player to game
+    const updatedToss = await tossManager.addPlayerToGame(
+      tossId, 
+      message.senderInboxId, 
+      selectedOption, 
+      true
+    );
+    
+    // Calculate player ID
+    const playerId = `P${updatedToss.participants.findIndex(p => p === message.senderInboxId) + 1}`;
+    
+    // Send confirmation
+    let response = `✅ Successfully joined!\nAmount: ${updatedToss.tossAmount}\nChoice: ${selectedOption}\nTotal players: ${updatedToss.participants.length}`;
+    
+    if (updatedToss.tossTopic) {
+      response += `\nToss Topic: "${updatedToss.tossTopic}"`;
+    }
+    
+    await conversation.send(response);
+    
+  } catch (error) {
+    await conversation.send(`⚠️ Error joining toss: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Formatting helpers ----------------------------------------
+
+/**
+ * Format toss status information
+ */
+function formatTossStatus(toss: GroupTossName): string {
+  // Calculate total pot
+  const totalPot = parseFloat(toss.tossAmount) * toss.participants.length;
+  
+  // Count votes for each option
+  const optionVotes: Record<string, number> = {};
+  
+  // Initialize vote counts
+  if (toss.tossOptions && toss.tossOptions.length > 0) {
+    toss.tossOptions.forEach(option => {
+      optionVotes[option] = 0;
+    });
+  } else {
+    optionVotes["heads"] = 0;
+    optionVotes["tails"] = 0;
+  }
+  
+  // Count votes
+  if (toss.participantOptions && toss.participantOptions.length > 0) {
+    toss.participantOptions.forEach(participant => {
+      optionVotes[participant.option] = (optionVotes[participant.option] || 0) + 1;
+    });
+  }
+  
+  // Build response
+  let response = `${toss.tossTopic} 📊\n\n`;
+  response += `Options: ${toss.tossOptions?.join(", ")}\n`;
+  response += `Total Players: ${toss.participants.length}\n`;
+  response += `Creator: ${toss.creator.slice(0, 6)}...\n`;
+  response += `Toss Amount: ${toss.tossAmount} USDC per player\n`;
+  response += `Total Pot: ${totalPot.toFixed(2)} USDC\n\n`;
+  
+  // Vote distribution
+  if (Object.keys(optionVotes).length > 0) {
+    response += "Vote Distribution:\n";
+
+    for (const [option, count] of Object.entries(optionVotes)) {
+      if (count > 0) {
+        const winningsPerPerson = count > 0 ? totalPot / count : 0;
+        
+        response += `${option}: ${count} vote${count !== 1 ? 's' : ''}\n`;
+        if (count > 0) {
+          response += `   If "${option}" wins: ${winningsPerPerson.toFixed(2)} USDC per winner\n`;
+        }
+      }
+    }
+  }
+  
+  return response;
+}
+
+/**
+ * Format toss result information
+ */
+function formatTossResult(toss: GroupTossName, winningOption: string | null, isForceClose: boolean): string {
+  if (isForceClose) {
+    let response = `🚫 Toss force closed by creator!\n\n`;
+    
+    if (toss.paymentSuccess) {
+      response += `All participants have been refunded their ${toss.tossAmount} USDC.\n`;
+    } else {
+      response += "⚠️ Refund distribution failed. Please contact support.";
+    }
+    
+    return response;
+  } else {
+    // Regular close with a winning option
+    const winnerEntries = toss.participantOptions
+      .filter((p: Participant) => p.option.toLowerCase() === winningOption?.toLowerCase());
+    
+    const totalPot = parseFloat(toss.tossAmount) * toss.participants.length;
+    const prizePerWinner = winnerEntries.length > 0 ? totalPot / winnerEntries.length : 0;
+    
+    let response = `🏆 Toss closed! Result: "${winningOption}"\n\n`;
+    
+    if (toss.paymentSuccess) {
+      response += `${winnerEntries.length} winner(s)${winnerEntries.length > 0 ? ` with option "${winningOption}"` : ""}\n`;
+      response += `Prize per winner: ${prizePerWinner.toFixed(2)} USDC\n\n`;
+      response += "Winners:\n";
+      
+      winnerEntries.forEach((winner: Participant) => {
+        response += `P${toss.participants.findIndex(p => p === winner.inboxId) + 1}\n`;
+      });
+    } else {
+      response += "⚠️ Payment distribution failed. Please contact support.";
+    }
+    
+    return response;
+  }
+}

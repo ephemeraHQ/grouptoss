@@ -1,5 +1,5 @@
 {
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "helpers/storage.ts"],
   "compilerOptions": {
     "outDir": "./dist",
     "esModuleInterop": true,
