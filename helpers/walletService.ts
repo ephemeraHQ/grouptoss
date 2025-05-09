@@ -335,11 +335,12 @@ export class WalletService {
         console.error(`❌ Failed to create transfer`);
         return undefined;
       }
-      console.log(JSON.stringify(transfer, null, 2));
-     
-      console.log(`⚠️ Transfer initiated and processing on blockchain`);
-      console.log(`ℹ️ Note: The transaction will continue processing on the blockchain even though we're not waiting for confirmation`);
-      
+      try {
+        await transfer.wait();
+        console.log("Transfer has been confirmed:","URL:",await transfer.getTransactionLink(),"Hash:",await transfer.getTransactionHash());
+      } catch (error: unknown) {
+        console.error("Error while waiting for transfer to complete:", error);
+      }
       // Return the transfer object immediately
       return transfer;
       
