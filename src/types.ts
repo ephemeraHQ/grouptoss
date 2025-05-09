@@ -1,5 +1,4 @@
-import { type createReactAgent } from "@langchain/langgraph/prebuilt";    
-import { type Client, type Conversation, type DecodedMessage } from "@xmtp/node-sdk";
+import { type Conversation, type DecodedMessage } from "@xmtp/node-sdk";
 
 export interface NetworkConfig {
   tokenAddress: string;
@@ -54,17 +53,19 @@ export interface GroupTossName {
   creator: string;
   tossAmount: string;
   status: TossStatus;
-  participants: string[]; // Maintaining for backward compatibility
-  participantOptions: Participant[]; // New field to track participant options
-  winner?: string;
+  participants: string[];
+  participantOptions: Participant[];
+  tossOptions?: string[];
+  tossTopic?: string;
   walletAddress: string;
   createdAt: number;
-  tossResult?: string;
-  paymentSuccess?: boolean;
+  tossResult: string;
+  paymentSuccess: boolean;
   transactionLink?: string;
   transactionHash?: string;
-  tossTopic?: string;
-  tossOptions?: string[];
+  failedWinners?: string[];
+  failedRefunds?: string[];
+  conversationId?: string;
 }
 
 export enum TossStatus {
@@ -127,6 +128,10 @@ export interface Transfer {
   model?: {
     sponsored_send?: {
       transaction_link?: string;
+      transaction_hash?: string;
     };
   };
-} 
+  transactionHash?: string;
+  transactionLink?: string;
+}
+

@@ -20,20 +20,25 @@ import { MemorySaver } from "@langchain/langgraph";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import { isAddress } from "viem";
-import { storage } from "../src/storage";
-import { MAX_USDC_AMOUNT } from "../src/constants";
 
 // Initialize the SDK when the module is loaded
 let sdkInitialized = false;
 
-// Agent wallet data
-export type AgentWalletData = {
+// Wallet data interface
+export type WalletInfo = {
   id: string;
   walletData: WalletData;
-  agent_address: string;
-  inboxId: string;
+  address: string;
+  userId: string;
   wallet?: Wallet;
 };
+
+// Storage interface for persisting wallet data
+export interface WalletStorage {
+  saveWallet(userId: string, walletData: string): Promise<void>;
+  getWallet(userId: string): Promise<any | null>;
+  getWalletByAddress(address: string): Promise<any | null>;
+}
 
 const { CDP_API_KEY_NAME, CDP_API_KEY_PRIVATE_KEY, NETWORK_ID } =
   validateEnvironment([
@@ -46,18 +51,18 @@ const { CDP_API_KEY_NAME, CDP_API_KEY_PRIVATE_KEY, NETWORK_ID } =
 const memoryStore: Record<string, MemorySaver> = {};
 const agentStore: Record<string, ReturnType<typeof createReactAgent>> = {};
 
-export async function initializeAgent(inboxId: string, instruction: string) {
+export async function initializeAgent(userId: string, instruction: string) {
   try {
     // Check if we already have an agent for this user
-    if (inboxId in agentStore) {
-      console.log(`Using existing agent for user: ${inboxId}`);
+    if (userId in agentStore) {
+      console.log(`Using existing agent for user: ${userId}`);
       const agentConfig = {
-        configurable: { thread_id: `Toss Agent for ${inboxId}` },
+        configurable: { thread_id: `Agent for ${userId}` },
       };
-      return { agent: agentStore[inboxId], config: agentConfig };
+      return { agent: agentStore[userId], config: agentConfig };
     }
 
-    console.log(`Initializing agent for inbox: ${inboxId}`);
+    console.log(`Initializing agent for user: ${userId}`);
 
     const llm = new ChatOpenAI({
       modelName: "gpt-4.1",
@@ -85,26 +90,26 @@ export async function initializeAgent(inboxId: string, instruction: string) {
     const tools = await getLangChainTools(agentkit);
 
     // Get or create memory saver for this user
-    if (!(inboxId in memoryStore)) {
-      console.log(`Creating new memory store for user: ${inboxId}`);
-      memoryStore[inboxId] = new MemorySaver();
+    if (!(userId in memoryStore)) {
+      console.log(`Creating new memory store for user: ${userId}`);
+      memoryStore[userId] = new MemorySaver();
     } else {
-      console.log(`Using existing memory store for user: ${inboxId}`);
+      console.log(`Using existing memory store for user: ${userId}`);
     }
 
     const agentConfig = {
-      configurable: { thread_id: `Toss Agent for ${inboxId}` },
+      configurable: { thread_id: `Agent for ${userId}` },
     };
 
     const agent = createReactAgent({
       llm,
       tools,
-      checkpointSaver: memoryStore[inboxId],
+      checkpointSaver: memoryStore[userId],
       messageModifier: instruction,
     });
 
     // Store the agent for future use
-    agentStore[inboxId] = agent;
+    agentStore[userId] = agent;
 
     console.log("Agent created successfully");
     return { agent, config: agentConfig };
@@ -130,15 +135,21 @@ function initializeCoinbaseSDK(): boolean {
 }
 
 export class WalletService {
-  constructor() {
+  private storage: WalletStorage;
+  private maxTransferAmount: number;
+
+  constructor(storage: WalletStorage, maxTransferAmount = 100) {
+    this.storage = storage;
+    this.maxTransferAmount = maxTransferAmount;
+    
     if (!sdkInitialized) {
       sdkInitialized = initializeCoinbaseSDK();
     }
   }
 
-  async createWallet(inboxId: string): Promise<AgentWalletData> {
+  async createWallet(userId: string): Promise<WalletInfo> {
     try {
-      console.log(`Creating new wallet for key ${inboxId}...`);
+      console.log(`Creating new wallet for user ${userId}...`);
 
       // Initialize SDK if not already done
       if (!sdkInitialized) {
@@ -165,22 +176,21 @@ export class WalletService {
       const address = await wallet.getDefaultAddress();
       const walletAddress = address.getId();
 
-      const walletInfo: AgentWalletData = {
+      const walletInfo: WalletInfo = {
         id: walletAddress,
         wallet: wallet,
         walletData: data,
-        agent_address: walletAddress,
-        inboxId: inboxId,
+        address: walletAddress,
+        userId: userId,
       };
 
-      await storage.saveWallet(
-        inboxId,
+      await this.storage.saveWallet(
+        userId,
         JSON.stringify({
           id: walletInfo.id,
-          // no wallet
           walletData: walletInfo.walletData,
-          agent_address: walletInfo.agent_address,
-          inboxId: walletInfo.inboxId,
+          address: walletInfo.address,
+          userId: walletInfo.userId,
         })
       );
       console.log("Wallet created and saved successfully");
@@ -197,12 +207,11 @@ export class WalletService {
     }
   }
 
-  async getWallet(inboxId: string): Promise<AgentWalletData | undefined> {
-    // Try to retrieve existing wallet data
-    const walletData = await storage.getWallet(inboxId);
+  async getWallet(userId: string): Promise<WalletInfo | undefined> {
+    const walletData = await this.storage.getWallet(userId);
     if (walletData === null) {
-      console.log(`No wallet found for ${inboxId}, creating new one`);
-      return this.createWallet(inboxId);
+        console.log(`No wallet found ${userId}, creating new one`);
+        return this.createWallet(userId);
     }
 
     const importedWallet = await Wallet.import(walletData.walletData);
@@ -211,63 +220,66 @@ export class WalletService {
       id: importedWallet.getId() ?? "",
       wallet: importedWallet,
       walletData: walletData.walletData,
-      agent_address: walletData.agent_address,
-      inboxId: walletData.inboxId,
+      address: walletData.address,
+      userId: walletData.userId,
     };
   }
 
-  /**
-   * Check if an address belongs to a toss wallet and return the corresponding toss ID
-   */
-  public async getTossIdFromAddress(address: string): Promise<string | null> {
+  async getWalletByAddress(address: string): Promise<WalletInfo | null> {
     if (!isAddress(address)) return null;
 
     try {
-      // Look for toss games with this wallet address
-      const tosses = await storage.listActiveTosses();
-      const matchingToss = tosses.find(
-        (toss) => toss.walletAddress.toLowerCase() === address.toLowerCase()
-      );
-
-      if (matchingToss) {
-        console.log(`📌 Address ${address} belongs to toss:${matchingToss.id}`);
-        return matchingToss.id;
+      // Look for wallet with this address
+      const walletData = await this.storage.getWalletByAddress(address);
+      if (walletData) {
+        const importedWallet = await Wallet.import(walletData.walletData);
+        return {
+          id: importedWallet.getId() ?? "",
+          wallet: importedWallet,
+          walletData: walletData.walletData,
+          address: walletData.address,
+          userId: walletData.userId,
+        };
       }
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.log(`ℹ️ Error checking for toss wallet: ${errorMessage}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log(`Error looking up wallet by address: ${errorMessage}`);
     }
 
     return null;
   }
 
   async transfer(
-    inboxId: string,
+    fromUserId: string,
     toAddress: string,
     amount: number
   ): Promise<CoinbaseTransfer | undefined> {
+    if (!toAddress) {
+      console.error(`❌ Invalid destination address: null or undefined`);
+      return undefined;
+    }
+    
     toAddress = toAddress.toLowerCase();
 
     console.log("📤 TRANSFER INITIATED");
     console.log(`💸 Amount: ${amount} USDC`);
-    console.log(`🔍 From user: ${inboxId}`);
+    console.log(`🔍 From user: ${fromUserId}`);
     console.log(`🔍 To: ${toAddress}`);
 
     // Validate amount is not above the maximum limit
-    if (amount > MAX_USDC_AMOUNT) {
-      console.error(`❌ Amount ${amount} exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
+    if (amount > this.maxTransferAmount) {
+      console.error(`❌ Amount ${amount} exceeds maximum limit of ${this.maxTransferAmount} USDC`);
       return undefined;
     }
 
     // Get the source wallet
-    console.log(`🔑 Retrieving source wallet for user: ${inboxId}...`);
-    const from = await this.getWallet(inboxId);
+    console.log(`🔑 Retrieving source wallet for user: ${fromUserId}...`);
+    const from = await this.getWallet(fromUserId);
     if (!from) {
-      console.error(`❌ No wallet found for sender: ${inboxId}`);
+      console.error(`❌ No wallet found for sender: ${fromUserId}`);
       return undefined;
     }
-    console.log(`✅ Source wallet found: ${from.agent_address}`);
+    console.log(`✅ Source wallet found: ${from.address}`);
 
     if (!Number(amount)) {
       console.error(`❌ Invalid amount: ${amount}`);
@@ -275,9 +287,7 @@ export class WalletService {
     }
 
     // Check balance
-    console.log(
-      `💰 Checking balance for source wallet: ${from.agent_address}...`
-    );
+    console.log(`💰 Checking balance for source wallet: ${from.address}...`);
     const balance = await from.wallet?.getBalance(Coinbase.assets.Usdc);
     console.log(`💵 Available balance: ${Number(balance)} USDC`);
 
@@ -300,24 +310,19 @@ export class WalletService {
     let destinationAddress = toAddress;
     console.log(`🔑 Validating destination: ${toAddress}...`);
 
-    // First check if this address belongs to a toss wallet
-    const tossId = await this.getTossIdFromAddress(toAddress);
-    if (tossId) {
-      // Use the toss ID instead of the address
-      console.log(`🎮 Found toss ID: ${tossId} for address: ${toAddress}`);
-      const tossWallet = await this.getWallet(tossId);
-      if (tossWallet) {
-        destinationAddress = tossWallet.agent_address;
-        console.log(`✅ Using toss wallet: ${destinationAddress}`);
-        // Continue with the existing wallet, don't create a new one
-      }
+    // Check if this address belongs to a wallet in our system
+    const existingWallet = await this.getWalletByAddress(toAddress);
+    if (existingWallet) {
+      // Use the address from our system
+      console.log(`✅ Using existing wallet with address: ${existingWallet.address}`);
+      destinationAddress = existingWallet.address;
     } else {
       console.log(`ℹ️ Using raw address as destination: ${destinationAddress}`);
     }
 
     try {
       console.log(
-        `🚀 Executing transfer of ${amount} USDC from ${from.agent_address} to ${destinationAddress}...`
+        `🚀 Executing transfer of ${amount} USDC from ${from.address} to ${destinationAddress}...`
       );
       const transfer = await from.wallet?.createTransfer({
         amount,
@@ -325,25 +330,20 @@ export class WalletService {
         destination: destinationAddress,
         gasless: true,
       });
-      console.log(`⏳ Waiting for transfer to complete...`);
-      try {
-        await transfer?.wait();
-        console.log(`✅ Transfer completed successfully!`);
-      } catch (err) {
-        if (err instanceof TimeoutError) {
-          console.log(
-            `⚠️ Waiting for transfer timed out, but transaction may still complete`
-          );
-        } else {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          console.error(
-            `❌ Error while waiting for transfer to complete:`,
-            errorMessage
-          );
-        }
+      
+      if (!transfer) {
+        console.error(`❌ Failed to create transfer`);
+        return undefined;
       }
-
+      try {
+        await transfer.wait();
+        console.log("Transfer has been confirmed:","URL:",await transfer.getTransactionLink(),"Hash:",await transfer.getTransactionHash());
+      } catch (error: unknown) {
+        console.error("Error while waiting for transfer to complete:", error);
+      }
+      // Return the transfer object immediately
       return transfer;
+      
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -353,27 +353,24 @@ export class WalletService {
   }
 
   async checkBalance(
-    inboxId: string
+    userId: string
   ): Promise<{ address: string | undefined; balance: number }> {
-    // First check if this is an address that belongs to a toss wallet
-    const tossId = await this.getTossIdFromAddress(inboxId);
-    if (tossId) {
-      // Use the toss ID instead of the address
-      console.log(`🎮 Using toss ID: ${tossId} instead of address: ${inboxId}`);
-      const tossWallet = await this.getWallet(tossId);
-      if (tossWallet) {
-        const balance = await tossWallet.wallet?.getBalance(
+    // Check if this is an address
+    if (isAddress(userId)) {
+      const walletByAddress = await this.getWalletByAddress(userId);
+      if (walletByAddress) {
+        const balance = await walletByAddress.wallet?.getBalance(
           Coinbase.assets.Usdc
         );
         return {
-          address: tossWallet.agent_address,
+          address: walletByAddress.address,
           balance: Number(balance),
         };
       }
     }
 
-    // Normal wallet lookup
-    const walletData = await this.getWallet(inboxId);
+    // Normal wallet lookup by user ID
+    const walletData = await this.getWallet(userId);
 
     if (!walletData) {
       return { address: undefined, balance: 0 };
@@ -381,27 +378,22 @@ export class WalletService {
 
     const balance = await walletData.wallet?.getBalance(Coinbase.assets.Usdc);
     return {
-      address: walletData.agent_address,
+      address: walletData.address,
       balance: Number(balance),
     };
   }
 
   async swap(
-    address: string,
+    userId: string,
     fromAssetId: string,
     toAssetId: string,
     amount: number
   ): Promise<Trade | undefined> {
-    address = address.toLowerCase();
-
-    // First check if this is an address that belongs to a toss wallet
-    const tossId = await this.getTossIdFromAddress(address);
-    if (tossId) {
-      // Use the toss ID instead of the address
-      console.log(`🎮 Using toss ID: ${tossId} instead of address: ${address}`);
-      const tossWallet = await this.getWallet(tossId);
-      if (tossWallet) {
-        const trade = await tossWallet.wallet?.createTrade({
+    // Check if this is an address
+    if (isAddress(userId)) {
+      const walletByAddress = await this.getWalletByAddress(userId);
+      if (walletByAddress) {
+        const trade = await walletByAddress.wallet?.createTrade({
           amount,
           fromAssetId,
           toAssetId,
@@ -421,8 +413,8 @@ export class WalletService {
       }
     }
 
-    // Normal wallet lookup
-    const walletData = await this.getWallet(address);
+    // Normal wallet lookup by user ID
+    const walletData = await this.getWallet(userId);
     if (!walletData) return undefined;
 
     const trade = await walletData.wallet?.createTrade({
