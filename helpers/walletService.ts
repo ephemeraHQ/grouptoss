@@ -330,25 +330,19 @@ export class WalletService {
         destination: destinationAddress,
         gasless: true,
       });
-      console.log(`⏳ Waiting for transfer to complete...`);
-      try {
-        await transfer?.wait();
-        console.log(`✅ Transfer completed successfully!`);
-      } catch (err) {
-        if (err instanceof TimeoutError) {
-          console.log(
-            `⚠️ Waiting for transfer timed out, but transaction may still complete`
-          );
-        } else {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          console.error(
-            `❌ Error while waiting for transfer to complete:`,
-            errorMessage
-          );
-        }
+      
+      if (!transfer) {
+        console.error(`❌ Failed to create transfer`);
+        return undefined;
       }
-
+      console.log(JSON.stringify(transfer, null, 2));
+     
+      console.log(`⚠️ Transfer initiated and processing on blockchain`);
+      console.log(`ℹ️ Note: The transaction will continue processing on the blockchain even though we're not waiting for confirmation`);
+      
+      // Return the transfer object immediately
       return transfer;
+      
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);

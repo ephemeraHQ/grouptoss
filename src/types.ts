@@ -128,6 +128,10 @@ export interface Transfer {
   model?: {
     sponsored_send?: {
       transaction_link?: string;
+      transaction_hash?: string;
     };
   };
-} 
+  transactionHash?: string;
+  transactionLink?: string;
+}
+

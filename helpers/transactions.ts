@@ -138,29 +138,8 @@ export function createUSDCTransferCalls(
     throw new Error(`Transaction amount (${amountInUsdc} USDC) exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
   }
   
-  // Modify amount to encode option selection if needed
-  let amountToSend = amount;
-  
-  if (additionalMetadata?.selectedOption && additionalMetadata?.tossOptions) {
-    // Find option index
-    const options = additionalMetadata.tossOptions;
-    const optionIndex = options.findIndex(
-      (opt: string) => opt.toLowerCase() === additionalMetadata.selectedOption.toLowerCase()
-    );
-    
-    if (optionIndex !== -1) {
-      // Encode option as remainder (add 1 or 2 to amount)
-      amountToSend += (optionIndex + 1);
-      console.log(`Encoding option "${additionalMetadata.selectedOption}" as option #${optionIndex + 1}, adjusted amount: ${amountToSend}`);
-    }
-  } else if (additionalMetadata?.isFirstOption !== undefined) {
-    // Direct encoding via isFirstOption flag
-    amountToSend += additionalMetadata.isFirstOption ? 1 : 2;
-  }
-  
-  if (additionalMetadata?.tossId) {
-    console.log(`Sending ${amountToSend} to encode option "${additionalMetadata.selectedOption}" for toss ID ${additionalMetadata.tossId}`);
-  }
+  // Use the exact amount provided without any modifications
+  const amountToSend = amount;
 
   // Format the transaction data following ERC20 transfer standard
   const transactionData = `${methodSignature}${recipientAddress
