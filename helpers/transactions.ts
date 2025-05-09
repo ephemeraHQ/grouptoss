@@ -4,26 +4,9 @@ import { createPublicClient, formatUnits, http } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import { ContentTypeTransactionReference, TransactionReference } from "@xmtp/content-type-transaction-reference";
 import { Conversation } from "@xmtp/node-sdk";
-import { NetworkConfig, TransactionDetails, ERC20TransferData } from "../src/types";
+import { TransactionDetails, ERC20TransferData } from "../src/types";
+import { MAX_USDC_AMOUNT, networks } from "src/constants";
 
-// Constants
-const MAX_USDC_AMOUNT = 10; // Maximum allowed USDC transaction amount
-const networks = [
-  {
-    tokenAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
-    chainId: "0x14a34" as `0x${string}`, // Base Sepolia network ID (84532 in hex)
-    decimals: 6,
-    networkName: "Base Sepolia",
-    networkId: "base-sepolia",
-  },
-  {
-    tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base Mainnet
-    chainId: "0x2105" as `0x${string}`, // Base Mainnet network ID (8453 in hex)
-    decimals: 6,
-    networkName: "Base Mainnet",
-    networkId: "base-mainnet",
-  },
-];
 
 // Get the network configuration based on environment
 const { NETWORK_ID } = validateEnvironment(["NETWORK_ID"]);

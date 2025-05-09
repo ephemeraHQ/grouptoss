@@ -65,6 +65,7 @@ export interface GroupTossName {
   transactionHash?: string;
   failedWinners?: string[];
   failedRefunds?: string[];
+  conversationId?: string;
 }
 
 export enum TossStatus {

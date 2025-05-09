@@ -2,15 +2,14 @@ import * as fs from "fs/promises";
 import { type createReactAgent } from "@langchain/langgraph/prebuilt";
 import { WalletService } from "../helpers/walletService";
 import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
-import { FileStorage } from "../helpers/lcoalStorage";
+import { FileStorage } from "../helpers/localStorage";
 import { parseNaturalLanguageToss } from "./utils";
 import { MAX_USDC_AMOUNT } from "./constants";
 import { Client } from "@xmtp/node-sdk";
 
 // Storage categories
 const STORAGE_CATEGORIES = {
-  TOSS: "tosses",
-  GROUP_MAPPING: "tosses/group_mapping"
+  TOSS: "tosses"
 };
 
 export class TossManager {
@@ -70,15 +69,15 @@ export class TossManager {
       paymentSuccess: false,
     };
 
-    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
-    
-    // If conversationId is provided, associate this toss with the conversation
+    // If conversationId is provided, store it directly in toss object
     if (conversationId) {
-      await this.storage.saveData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId, { tossId });
+      toss.conversationId = conversationId;
       console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.address} and linked to group ${conversationId}`);
     } else {
       console.log(`🎮 Toss ${tossId} created with wallet ${tossWallet.address}`);
     }
+
+    await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
     
     return toss;
   }
@@ -114,11 +113,6 @@ export class TossManager {
         );
       }
     }
-
-    // Ensure player has a wallet (don't wait for this, just ensure it starts)
-    this.walletService.getWallet(player).catch(err => {
-      console.log(`Failed to create wallet for player ${player}: ${err}`);
-    });
 
     // Add player
     toss.participants.push(player);
@@ -258,6 +252,11 @@ export class TossManager {
     let transactionHash: string | undefined;
     const failedWinners: string[] = [];
 
+    // Make sure XMTP client is set before looking up addresses
+    if (!this.client) {
+      throw new Error("XMTP client not set, cannot lookup wallet addresses");
+    }
+
     for (const winner of winners) {
       try {
         if (!winner.inboxId) {
@@ -265,19 +264,28 @@ export class TossManager {
           continue;
         }
 
-        // Get the wallet for this participant
-        const winnerWallet = await this.walletService.getWallet(winner.inboxId);
-        if (!winnerWallet || !winnerWallet.address) {
-          console.log(`No wallet or address found for winner ${winner.inboxId}, skipping`);
+        // Get the winner's wallet address from XMTP
+        let winnerAddress: string | undefined;
+        try {
+          const inboxState = await this.client.preferences.inboxStateFromInboxIds([winner.inboxId]);
+          if (inboxState.length > 0 && inboxState[0].identifiers.length > 0) {
+            winnerAddress = inboxState[0].identifiers[0].identifier;
+          }
+        } catch (lookupError) {
+          console.log(`Error looking up address for winner ${winner.inboxId}: ${lookupError}`);
+        }
+
+        if (!winnerAddress) {
+          console.log(`No address found for winner ${winner.inboxId}, skipping`);
           failedWinners.push(winner.inboxId);
           continue;
         }
 
-        console.log(`Transferring ${prizePerWinner} USDC to winner ${winner.inboxId} at address ${winnerWallet.address}`);
+        console.log(`Transferring ${prizePerWinner} USDC to winner ${winner.inboxId} at address ${winnerAddress}`);
         
         const transfer = await this.walletService.transfer(
           tossId, // Using tossId as userId for the wallet
-          winnerWallet.address,
+          winnerAddress,
           prizePerWinner
         );
 
@@ -348,6 +356,11 @@ export class TossManager {
       throw new Error("Toss wallet not found");
     }
 
+    // Make sure XMTP client is set before looking up addresses
+    if (!this.client) {
+      throw new Error("XMTP client not set, cannot lookup wallet addresses");
+    }
+
     // Track successful refunds
     const successfulTransfers: string[] = [];
     const failedRefunds: string[] = [];
@@ -360,20 +373,29 @@ export class TossManager {
           continue;
         }
 
-        // Get participant wallet
-        const participantWallet = await this.walletService.getWallet(participant);
-        if (!participantWallet || !participantWallet.address) {
-          console.log(`No wallet or address found for participant ${participant}, skipping`);
+        // Get participant wallet address from XMTP
+        let participantAddress: string | undefined;
+        try {
+          const inboxState = await this.client.preferences.inboxStateFromInboxIds([participant]);
+          if (inboxState.length > 0 && inboxState[0].identifiers.length > 0) {
+            participantAddress = inboxState[0].identifiers[0].identifier;
+          }
+        } catch (lookupError) {
+          console.log(`Error looking up address for participant ${participant}: ${lookupError}`);
+        }
+
+        if (!participantAddress) {
+          console.log(`No address found for participant ${participant}, skipping`);
           failedRefunds.push(participant);
           continue;
         }
 
-        console.log(`Refunding ${toss.tossAmount} USDC to participant ${participant} at address ${participantWallet.address}`);
+        console.log(`Refunding ${toss.tossAmount} USDC to participant ${participant} at address ${participantAddress}`);
       
         // Return their original entry amount
         const transfer = await this.walletService.transfer(
           tossId, // Using tossId as userId for the wallet
-          participantWallet.address,
+          participantAddress,
           parseFloat(toss.tossAmount)
         );
 
@@ -462,18 +484,30 @@ export class TossManager {
    * @returns The active toss ID or null if none exists
    */
   async getActiveTossForConversation(conversationId: string): Promise<GroupTossName | null> {
-    const mapping = await this.storage.getData<{ tossId: string }>(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId);
-    if (!mapping) return null;
-    
-    const toss = await this.getToss(mapping.tossId);
-    
-    // If toss is completed or cancelled, remove the mapping
-    if (toss && [TossStatus.COMPLETED, TossStatus.CANCELLED].includes(toss.status)) {
-      await this.storage.deleteData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId);
+    // Read all tosses to find one with matching conversationId
+    try {
+      const tossDir = `.data/${STORAGE_CATEGORIES.TOSS}`;
+      const files = await fs.readdir(tossDir);
+      const tossFiles = files.filter(file => file.endsWith(".json") && !isNaN(Number(file.split("-")[0])));
+      
+      for (const file of tossFiles) {
+        const tossId = file.split("-")[0];
+        const toss = await this.getToss(tossId);
+        
+        if (toss && toss.conversationId === conversationId) {
+          // If toss is completed or cancelled, consider it inactive
+          if ([TossStatus.COMPLETED, TossStatus.CANCELLED].includes(toss.status)) {
+            continue;
+          }
+          return toss;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Error finding active toss for conversation:", error);
       return null;
     }
-    
-    return toss;
   }
   
   /**
@@ -482,7 +516,11 @@ export class TossManager {
    * @param tossId The toss ID to set as active
    */
   async setActiveTossForConversation(conversationId: string, tossId: string): Promise<void> {
-    await this.storage.saveData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId, { tossId });
+    const toss = await this.getToss(tossId);
+    if (toss) {
+      toss.conversationId = conversationId;
+      await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
+    }
   }
   
   /**
@@ -490,7 +528,12 @@ export class TossManager {
    * @param conversationId The conversation ID
    */
   async clearActiveTossForConversation(conversationId: string): Promise<void> {
-    await this.storage.deleteData(STORAGE_CATEGORIES.GROUP_MAPPING, conversationId);
+    // Find the toss with this conversation ID and clear it
+    const toss = await this.getActiveTossForConversation(conversationId);
+    if (toss) {
+      delete toss.conversationId;
+      await this.storage.saveData(STORAGE_CATEGORIES.TOSS, toss.id, toss);
+    }
   }
 
   setClient(client: Client): void {

@@ -5,7 +5,7 @@ import { TossManager } from "./toss-manager";
 import { checkTransactionWithRetries, createUSDCTransferCalls, extractERC20TransferData, sendTransactionReference } from "../helpers/transactions";
 import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
-import { storage } from "../helpers/lcoalStorage";
+import { storage } from "../helpers/localStorage";
 import { customJSONStringify } from "./utils";
 
 // Wallet operations ----------------------------------------
@@ -230,12 +230,12 @@ export async function handleExplicitCommand(
         await tossManager.clearActiveTossForConversation(conversationId);
         
         const response = formatTossResult(closedToss, winningOption, isForceClose);
-        
         if (closedToss.transactionHash) {
+          await conversation.send(response);
           await sendTransactionReference(conversation, closedToss.transactionHash);
         }
         
-        return response;
+        return "";
       } catch (error) {
         return `Error closing toss: ${error instanceof Error ? error.message : String(error)}`;
       }

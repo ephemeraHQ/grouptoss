@@ -208,11 +208,10 @@ export class WalletService {
   }
 
   async getWallet(userId: string): Promise<WalletInfo | undefined> {
-    // Try to retrieve existing wallet data
     const walletData = await this.storage.getWallet(userId);
     if (walletData === null) {
-      console.log(`No wallet found for ${userId}, creating new one`);
-      return this.createWallet(userId);
+        console.log(`No wallet found ${userId}, creating new one`);
+        return this.createWallet(userId);
     }
 
     const importedWallet = await Wallet.import(walletData.walletData);
