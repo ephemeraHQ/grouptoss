@@ -715,8 +715,9 @@ export class TossManager {
           await this.clearActiveTossForConversation(conversationId);
           
           const response = this.formatTossResult(closedToss, winningOption, isForceClose);
+          
+          await conversation.send(response);
           if (closedToss.transactionHash) {
-            await conversation.send(response);
             await sendTransactionReference(conversation, closedToss.transactionHash);
           }
           
