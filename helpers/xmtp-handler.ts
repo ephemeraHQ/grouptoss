@@ -15,11 +15,11 @@ import {
   type XmtpEnv,
 } from "@xmtp/node-sdk";
 import "dotenv/config";
-import { sendWelcomeMessage, sendGroupWelcomeMessage } from   "./xmtp-other";
+import { preMessageHandler } from   "./xmtp-other";
 /**
  * Configuration options for the XMTP agent
  */
-interface AgentOptions {
+export interface AgentOptions {
   walletKey: string;
   /** Whether to accept group conversations */
   acceptGroups?: boolean;
@@ -146,32 +146,13 @@ export const initializeClient = async (
 
             const isDm = conversation instanceof Dm;
             const isGroup = conversation instanceof Group;
-            
-            // Handle welcome messages for DMs
-            if (options.welcomeMessage && isDm) {
-              const sent = await sendWelcomeMessage(
-                client,
-                conversation,
-                options.welcomeMessage,
-              );
-              if (sent) {
-                console.log(`[${env}] Welcome message sent, skipping`);
-                continue;
-              }
+
+            const preMessageHandlerResult = await preMessageHandler(client, conversation, message, isDm, options);   
+            if(preMessageHandlerResult){ 
+              console.log(`[${env}] Pre-message handler returned true, skipping`);
+              continue;
             }
-            console.log(options.groupWelcomeMessage,isGroup,options.acceptGroups);
-            // Handle welcome messages for Groups
-            if (options.groupWelcomeMessage && isGroup && options.acceptGroups) {
-              const sent = await sendGroupWelcomeMessage(
-                client,
-                conversation as Group,
-                options.groupWelcomeMessage,
-              );
-              if (sent) {
-                console.log(`[${env}] Group welcome message sent, skipping`);
-                continue;
-              }
-            }
+          
 
             if (isDm || options.acceptGroups) {
               try {

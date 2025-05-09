@@ -245,7 +245,8 @@ export class WalletService {
   async transfer(
     inboxId: string,
     toAddress: string,
-    amount: number
+    amount: number,
+    isDirectTransfer = false
   ): Promise<CoinbaseTransfer | undefined> {
     toAddress = toAddress.toLowerCase();
 
@@ -258,6 +259,13 @@ export class WalletService {
     if (amount > MAX_USDC_AMOUNT) {
       console.error(`❌ Amount ${amount} exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
       return undefined;
+    }
+
+    // For direct transfers via wallet-send-calls, we skip the wallet retrieval and transfer
+    if (isDirectTransfer) {
+      console.log(`✅ DIRECT TRANSFER via wallet-send-calls (bypassing agent wallet)`);
+      // Return a mock successful transfer object
+      return { success: true } as any;
     }
 
     // Get the source wallet

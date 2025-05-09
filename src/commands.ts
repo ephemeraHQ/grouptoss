@@ -384,24 +384,34 @@ export async function handleExplicitCommand(
           const prizePerWinner = totalPot / winnerEntries.length;
           
           let response = `🏆 Toss closed! Result: "${winningOption}"\n\n`;
+          response += `${winnerEntries.length} winner(s)${winnerEntries.length > 0 ? ` with option "${winningOption}"` : ""}\n`;
+          response += `Prize per winner: ${prizePerWinner.toFixed(2)} USDC\n\n`;
           
-          if (closedToss.paymentSuccess) {
-            response += `${winnerEntries.length} winner(s)${winnerEntries.length > 0 ? ` with option "${winningOption}"` : ""}\n`;
-            response += `Prize per winner: ${prizePerWinner.toFixed(2)} USDC\n\n`;
-            response += "Winners:\n";
-            
-            winnerEntries.forEach((winner: Participant) => {
-              response += `P${closedToss.participants.findIndex(p => p === winner.inboxId) + 1}\n`;
-            });
-            
-            if (closedToss.transactionLink) {
-              response += `\nTransaction: ${closedToss.transactionLink}`;
+          // Send the initial response before wallet-send-calls
+          await conversation.send(response);
+          
+          // Generate and send wallet-send-calls for each winner
+          let successfulButtons = 0;
+          for (const winner of winnerEntries) {
+            try {
+              const transferCall = await tossManager.createWinningsTransferCalls(
+                tossId,
+                winner.inboxId,
+                prizePerWinner
+              );
+              
+              if (transferCall) {
+                // Send the wallet-send-calls to the group
+                await conversation.send(transferCall, ContentTypeWalletSendCalls);
+                successfulButtons++;
+              }
+            } catch (error) {
+              console.error(`Error creating winning transfer button for ${winner.inboxId}:`, error);
             }
-          } else {
-            response += "⚠️ Payment distribution failed. Please contact support.";
           }
           
-          return response;
+          // Return empty string since we've already sent responses
+          return "";
         }
       } catch (error) {
         return `Error closing toss: ${error instanceof Error ? error.message : String(error)}`;

@@ -31,6 +31,9 @@ async function handleTransactionReference(
   tossManager: TossManager
 ): Promise<void> {
   try {
+    // Give the tossManager access to the client for getting user addresses
+    tossManager.setClient(client);
+    
     console.log(`📝 Processing transaction reference:`, message.content);
     console.log(`Transaction reference full structure: ${JSON.stringify(message.content, null, 2)}`);
     
@@ -259,7 +262,7 @@ async function processTossJoin(
     
     // Process the join
     try {
-      // Add player with selected option
+      // Add player with selected option - use isDirectTransfer=true since transaction already happened
       const updatedToss = await tossManager.addPlayerToGame(
         tossId, 
         message.senderInboxId, 
@@ -303,6 +306,9 @@ async function processMessage(
     
     // Initialize toss manager
     const tossManager = new TossManager();
+    // Set the client for direct transfers
+    tossManager.setClient(client);
+    
     const inboxId = message.senderInboxId;
     // Handle transaction references
     if (message.contentType?.typeId === "transactionReference") {

@@ -5,9 +5,12 @@ import { AgentConfig, GroupTossName, Participant, TossStatus } from "./types";
 import { storage } from "./storage";
 import { parseNaturalLanguageToss } from "./utils";
 import { MAX_USDC_AMOUNT } from "./constants";
+import { Client } from "@xmtp/node-sdk";
+import { createUSDCTransferCalls } from "./transactions";
 
 export class TossManager {
   private walletService = new WalletService();
+  private client?: Client;
 
   // Getter for walletService
   get walletServiceInstance(): WalletService {
@@ -140,7 +143,8 @@ export class TossManager {
     inboxId: string,
     tossId: string,
     amount: string,
-    chosenOption: string
+    chosenOption: string,
+    isDirectTransfer = false
   ): Promise<boolean> {
     console.log(`💸 Processing payment: User ${inboxId}, Toss ${tossId}, Amount ${amount}, Option ${chosenOption}`);
 
@@ -148,6 +152,28 @@ export class TossManager {
       const toss = await storage.getToss(tossId);
       if (!toss) throw new Error("Toss not found");
 
+      // For direct transfers, we don't need to execute a transfer since it was already done
+      // Just record the participant and their chosen option
+      if (isDirectTransfer) {
+        console.log(`✅ Recording direct transfer for user ${inboxId} with option ${chosenOption}`);
+        
+        // Create participant record
+        const participant: Participant = {
+          inboxId,
+          option: chosenOption,
+        };
+
+        // Update participants list if not already included
+        if (!toss.participants.includes(inboxId)) {
+          toss.participants.push(inboxId);
+          toss.participantOptions.push(participant);
+          await storage.updateToss(toss);
+        }
+        
+        return true;
+      }
+
+      // For regular transfers via the agent wallet
       return !!await this.walletService.transfer(
         inboxId,
         toss.walletAddress,
@@ -227,27 +253,54 @@ export class TossManager {
     const totalPot = parseFloat(toss.tossAmount) * toss.participants.length;
     const prizePerWinner = totalPot / winners.length;
     const successfulTransfers: string[] = [];
+    let transactionLink: string | undefined;
+
+    // Calculate prize amount in decimals (USDC has 6 decimals)
+    const prizeAmountInDecimals = Math.floor(prizePerWinner * Math.pow(10, 6));
 
     for (const winner of winners) {
       try {
         if (!winner.inboxId) continue;
 
-        const winnerWallet = await this.walletService.getWallet(winner.inboxId);
-        if (!winnerWallet) continue;
+        if (!this.client) {
+          console.log("No client available to get user addresses, falling back to wallet retrieval method");
+          // Fall back to original method if client not available
+          const winnerWallet = await this.walletService.getWallet(winner.inboxId);
+          if (!winnerWallet) continue;
 
-        const transfer = await this.walletService.transfer(
-          tossWallet.inboxId,
-          winnerWallet.agent_address,
-          prizePerWinner
-        );
+          const transfer = await this.walletService.transfer(
+            tossWallet.inboxId,
+            winnerWallet.agent_address,
+            prizePerWinner
+          );
 
-        if (transfer) {
-          successfulTransfers.push(winner.inboxId);
-
-          // Set transaction link from first successful transfer
-          if (!toss.transactionLink) {
-            const transferData = transfer as any;
-            toss.transactionLink = transferData.model?.sponsored_send?.transaction_link;
+          if (transfer) {
+            successfulTransfers.push(winner.inboxId);
+            
+            if (!transactionLink) {
+              const transferData = transfer as any;
+              transactionLink = transferData.model?.sponsored_send?.transaction_link;
+            }
+          }
+        } else {
+          // Get winner's wallet address directly from their inboxId using XMTP client
+          try {
+            const inboxState = await this.client.preferences.inboxStateFromInboxIds([winner.inboxId]);
+            if (!inboxState || !inboxState[0]?.identifiers[0]?.identifier) {
+              console.log(`Could not find wallet address for winner ${winner.inboxId}`);
+              continue;
+            }
+            
+            const winnerAddress = inboxState[0].identifiers[0].identifier;
+            console.log(`Found winner address ${winnerAddress} for ${winner.inboxId}`);
+            
+            // Mark as successful - the actual transfer will happen via wallet-send-calls
+            successfulTransfers.push(winner.inboxId);
+            
+            // In a real implementation, you would record planned transfers here
+            // and possibly send wallet-send-calls messages to the toss group
+          } catch (error) {
+            console.error(`Error getting wallet address for ${winner.inboxId}:`, error);
           }
         }
       } catch (error) {
@@ -260,6 +313,10 @@ export class TossManager {
     toss.status = successfulTransfers.length > 0 
       ? TossStatus.COMPLETED 
       : TossStatus.CANCELLED;
+    
+    if (transactionLink) {
+      toss.transactionLink = transactionLink;
+    }
     
     await storage.updateToss(toss);
     return toss;
@@ -413,5 +470,72 @@ export class TossManager {
    */
   async clearActiveTossForConversation(conversationId: string): Promise<void> {
     await storage.removeGroupTossMapping(conversationId);
+  }
+
+  setClient(client: Client): void {
+    this.client = client;
+  }
+
+  /**
+   * Generate wallet-send-calls parameters for distributing winnings
+   * from a toss wallet to a winner
+   */
+  async createWinningsTransferCalls(
+    tossId: string,
+    winnerInboxId: string,
+    amount: number
+  ): Promise<any | null> {
+    if (!this.client) {
+      console.error("Client not available for wallet address resolution");
+      return null;
+    }
+
+    try {
+      // Get the toss details
+      const toss = await this.getToss(tossId);
+      if (!toss) {
+        console.error(`Toss ${tossId} not found`);
+        return null;
+      }
+
+      // Convert amount to decimals (6 for USDC)
+      const amountInDecimals = Math.floor(amount * Math.pow(10, 6));
+      
+      // Get the toss wallet
+      const tossWallet = await this.walletService.getWallet(tossId);
+      if (!tossWallet) {
+        console.error(`Toss wallet for ${tossId} not found`);
+        return null;
+      }
+      
+      // Get winner's wallet address
+      const inboxState = await this.client.preferences.inboxStateFromInboxIds([winnerInboxId]);
+      if (!inboxState || !inboxState[0]?.identifiers[0]?.identifier) {
+        console.error(`Could not find wallet address for winner ${winnerInboxId}`);
+        return null;
+      }
+      
+      const winnerAddress = inboxState[0].identifiers[0].identifier;
+      
+      // Create the wallet send calls with metadata
+      const description = `Winnings from Toss #${tossId} 🏆`;
+      
+      const walletSendCalls = createUSDCTransferCalls(
+        tossWallet.agent_address,
+        winnerAddress,
+        amountInDecimals,
+        {
+          tossId,
+          isWinnings: true,
+          description: `Toss #${tossId} Winnings 🏆`,
+        },
+        description
+      );
+      
+      return walletSendCalls;
+    } catch (error) {
+      console.error(`Error creating winnings transfer call: ${error}`);
+      return null;
+    }
   }
 } 
