@@ -1,6 +1,6 @@
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { initializeAgent } from "@helpers/walletService";
-import { initializeClient } from "@helpers/xmtp-handler";
+import { AgentOptions, initializeClient } from "@helpers/xmtp-handler";
 import { AGENT_INSTRUCTIONS, DEFAULT_AMOUNT, DEFAULT_OPTIONS, MAX_USDC_AMOUNT } from "./constants";
 import {  ParsedToss, StreamChunk, TossJsonResponse } from "./types";
 import { extractCommand, TossManager } from "./toss-manager";     
@@ -270,15 +270,14 @@ async function processMessage(
 }
 
 // Initialize client
-await initializeClient(processMessage, [
-  {
-    walletKey: process.env.WALLET_KEY as string,
-    acceptGroups: true,
-    acceptTypes: ["text", "transactionReference"],
-    networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
-    welcomeMessage: "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
-    groupWelcomeMessage: "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
-    codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
-  },
-]);
+const options: AgentOptions = { 
+  walletKey: process.env.WALLET_KEY as string,
+  acceptGroups: true,
+  acceptTypes: ["text", "transactionReference"],
+  networks: process.env.XMTP_ENV === "local" ? ["local"] : ["dev", "production"],
+  welcomeMessage: "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
+  groupWelcomeMessage: "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
+  codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
+}
+await initializeClient(processMessage, [options]);
 

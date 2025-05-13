@@ -1,5 +1,5 @@
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
-import { AgentOptions } from "./xmtp-handler";
+import { AgentOptions } from "./xmtp-handler";  
 
 export const sendWelcomeMessage = async (
   client: Client,
