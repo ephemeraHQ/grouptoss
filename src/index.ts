@@ -274,7 +274,7 @@ const options: AgentOptions = {
   walletKey: process.env.WALLET_KEY as string,
   acceptGroups: true,
   acceptTypes: ["text", "transactionReference"],
-  networks: process.env.XMTP_NETWORKS?.split(",") ?? ["local"],
+  networks: process.env.XMTP_NETWORKS?.split(",") ?? ["dev"],
   welcomeMessage: "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
   groupWelcomeMessage: "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
   codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
