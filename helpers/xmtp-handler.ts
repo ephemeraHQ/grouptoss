@@ -4,7 +4,7 @@ import {
   getDbPath,
   getEncryptionKeyFromHex,
   logAgentDetails,
-} from "@helpers/client";
+} from "./client";
 import {
   Client,
   Dm,
@@ -15,7 +15,7 @@ import {
   type XmtpEnv,
 } from "@xmtp/node-sdk";
 import "dotenv/config";
-import { preMessageHandler } from   "./xmtp-other";
+import { preMessageHandler } from   "./xmtp-skills";
 /**
  * Configuration options for the XMTP agent
  */
@@ -27,6 +27,7 @@ export interface AgentOptions {
   dbEncryptionKey?: string;
   /** Networks to connect to (default: ['dev', 'production']) */
   networks?: string[];
+  loggingLevel?: LogLevel;
   /** Public key of the agent */
   publicKey?: string;
   /** Content types to accept (default: ['text']) */
@@ -56,14 +57,15 @@ type MessageHandler = (
 // Constants
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 2000;
-const WATCHDOG_RESTART_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const SYNC_INTERVAL_MINUTES = 10;
 const DEFAULT_AGENT_OPTIONS: AgentOptions = {
   walletKey: "",
   dbEncryptionKey: process.env.ENCRYPTION_KEY ?? generateEncryptionKeyHex(),
   publicKey: "",
+  loggingLevel: process.env.LOGGING_LEVEL as LogLevel,
   acceptGroups: false,
   acceptTypes: ["text"],
-  networks: process.env.XMTP_ENV ? [process.env.XMTP_ENV] : ["dev"],
+  networks:  ["dev"],
   connectionTimeout: 30000,
   autoReconnect: true,
   welcomeMessage: "",
@@ -94,7 +96,6 @@ export const initializeClient = async (
     client: Client,
     callBack: MessageHandler,
     options: AgentOptions,
-    onActivity?: () => void,
   ): Promise<void> => {
     const env = client.options?.env;
     let retryCount = 0;
@@ -109,18 +110,13 @@ export const initializeClient = async (
           backoffTime = RETRY_DELAY_MS;
         }
 
-        // Notify activity monitor
-        if (onActivity) onActivity();
-
+        console.debug(`[${env}] Syncing conversations...`); 
+        await client.conversations.sync();
+        console.debug(`[${env}] Waiting for messages...`);
         const streamPromise = client.conversations.streamAllMessages();
         const stream = await streamPromise;
-
-        console.log(`[${env}] Waiting for messages...`);
-
         for await (const message of stream) {
           try {
-            // Notify activity monitor on each message
-            if (onActivity) onActivity();
             // Skip messages from self or with unsupported content types
             if (
               !message ||
@@ -136,11 +132,11 @@ export const initializeClient = async (
             );
 
             if (!conversation) {
-              console.log(`[${env}] Unable to find conversation, skipping`);
+              console.debug(`[${env}] Unable to find conversation, skipping`);
               continue;
             }
 
-            console.log(
+            console.debug(
               `[${env}] Received message: ${message.content as string} from ${message.senderInboxId}`,
             );
 
@@ -149,13 +145,13 @@ export const initializeClient = async (
 
             const preMessageHandlerResult = await preMessageHandler(client, conversation, message, isDm, options);   
             if(preMessageHandlerResult){ 
-              console.log(`[${env}] Pre-message handler returned true, skipping`);
+              console.debug(`[${env}] Pre-message handler returned true, skipping`);
               continue;
             }
           
-
-            if (isDm || options.acceptGroups) {
+            if (isDm || (isGroup && options.acceptGroups)) {
               try {
+                console.debug(`[${env}] Processing message ${message.content}...`);
                 await messageHandler(client, conversation, message, isDm);
               } catch (handlerError) {
                 console.error(
@@ -164,19 +160,13 @@ export const initializeClient = async (
                 );
               }
             } else {
-              console.log(
+              console.debug(
                 `[${env}] Conversation is not a DM and acceptGroups=false, skipping`,
               );
             }
-
-            // Notify activity monitor after processing
-            if (onActivity) onActivity();
           } catch (error) {
             // Handle errors within message processing without breaking the stream
             console.error(`[${env}] Error processing message:`, error);
-
-            // Still notify activity monitor even on errors
-            if (onActivity) onActivity();
           }
         }
 
@@ -185,9 +175,6 @@ export const initializeClient = async (
       } catch (error) {
         console.error(`[${env}] Stream error:`, error);
         retryCount++;
-
-        // Notify activity monitor
-        if (onActivity) onActivity();
 
         // If error seems fatal (connection, auth issues), try to recreate client
         if (retryCount > MAX_RETRIES) {
@@ -210,19 +197,12 @@ export const initializeClient = async (
           }
         }
 
-        // Try to re-sync conversations before retrying
-        try {
-          await client.conversations.sync();
-        } catch (syncError) {
-          console.error(`[${env}] Sync error:`, syncError);
-        }
-
         // Use exponential backoff with jitter
         backoffTime = Math.min(backoffTime * 1.5, 60000); // Cap at 1 minute
         const jitter = Math.random() * 0.3 * backoffTime; // 0-30% jitter
         const waitTime = backoffTime + jitter;
 
-        console.log(
+        console.debug(
           `[${env}] Retrying in ${Math.round(waitTime / 1000)}s... (${retryCount}/${MAX_RETRIES})`,
         );
         await sleep(waitTime);
@@ -230,56 +210,24 @@ export const initializeClient = async (
     }
   };
 
-  // Setup watchdog to detect stale connections
-  const setupWatchdog = (
-    client: Client,
-    env: string,
-    restartFn: () => Promise<void>,
-  ) => {
-    // If no restart interval is set, don't set up the watchdog
-    if (!WATCHDOG_RESTART_INTERVAL_MS) return;
-
-    let lastRestartTimestamp = Date.now();
-    // We'll still track activity for logging purposes
-    let lastActivityTimestamp = Date.now();
-    const updateActivity = () => {
-      lastActivityTimestamp = Date.now();
-    };
-
-    const watchdogInterval = setInterval(
-      () => {
-        const currentTime = Date.now();
-        const timeSinceLastRestart = currentTime - lastRestartTimestamp;
-        const inactiveTime = currentTime - lastActivityTimestamp;
-
-        // Force restart every WATCHDOG_RESTART_INTERVAL_MS regardless of activity
-        if (timeSinceLastRestart > WATCHDOG_RESTART_INTERVAL_MS) {
-          console.log(
-            `[${env}] Watchdog: Scheduled restart after ${Math.round(timeSinceLastRestart / 1000)}s (inactive for ${Math.round(inactiveTime / 1000)}s)`,
-          );
-
-          restartFn()
-            .then(() => {
-              console.log(
-                `[${env}] Watchdog: Connection restarted successfully`,
-              );
-              lastRestartTimestamp = Date.now();
-            })
-            .catch((error: unknown) => {
-              console.error(`[${env}] Watchdog: Failed to restart:`, error);
-            })
-            .finally(() => {
-              updateActivity();
-            });
-        }
-      },
-      Math.min(WATCHDOG_RESTART_INTERVAL_MS), // Check every WATCHDOG_RESTART_INTERVAL_MS
-    );
+  // Setup simple watchdog to sync every 10 minutes
+  const setupWatchdog = (client: Client, env: string) => {
+    const SYNC_INTERVAL_MS = SYNC_INTERVAL_MINUTES * 60 * 1000;
+    
+    const syncInterval = setInterval(() => {
+      console.debug(`[${env}] Watchdog: Running scheduled sync`);
+      client.conversations.sync()
+        .then(() => {
+          console.debug(`[${env}] Watchdog: Sync completed`);
+        })
+        .catch((error: unknown) => {
+          console.error(`[${env}] Watchdog: Sync failed:`, error);
+        });
+    }, SYNC_INTERVAL_MS);
 
     process.on("beforeExit", () => {
-      clearInterval(watchdogInterval);
+      clearInterval(syncInterval);
     });
-    return updateActivity;
   };
 
   const clients: Client[] = [];
@@ -288,47 +236,30 @@ export const initializeClient = async (
   for (const option of mergedOptions) {
     for (const env of option.networks ?? []) {
       try {
-        console.log(`[${env}] Initializing client...`);
+        console.debug(`[${env}] Initializing client...`);
 
         const signer = createSigner(option.walletKey);
-        const dbEncryptionKey = getEncryptionKeyFromHex(
-          option.dbEncryptionKey ??
-            process.env.ENCRYPTION_KEY ??
-            generateEncryptionKeyHex(),
-        );
-        const loggingLevel = (process.env.LOGGING_LEVEL ?? "off") as LogLevel;
+        const dbEncryptionKey = getEncryptionKeyFromHex(option.dbEncryptionKey as string)  
         const signerIdentifier = (await signer.getIdentifier()).identifier;
 
         const client = await Client.create(signer, {
           dbEncryptionKey,
           env: env as XmtpEnv,
-          loggingLevel,
+          loggingLevel: option.loggingLevel,
           dbPath: getDbPath(`${env}-${signerIdentifier}`),
           codecs: option.codecs ?? [],
         });
 
-        await client.conversations.sync();
         clients.push(client);
 
-        // Create restart function & watchdog
-        const restartStream = () =>
-          client.conversations
-            .sync()
-            .then(() => {
-              console.log(`[${env}] Forced re-sync completed`);
-            })
-            .catch((error: unknown) => {
-              console.error(`[${env}] Force re-sync failed:`, error);
-            });
-
-        const activityTracker = setupWatchdog(client, env, restartStream);
+        // Setup simple watchdog to sync every 10 minutes
+        setupWatchdog(client, env);
 
         // Start message streaming
         const streamPromise = streamMessages(
           client,
           messageHandler,
-          { ...option },
-          activityTracker,
+          { ...option }
         );
 
         streamPromises.push(streamPromise);
