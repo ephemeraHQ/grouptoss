@@ -65,7 +65,7 @@ const DEFAULT_AGENT_OPTIONS: AgentOptions = {
   loggingLevel: process.env.LOGGING_LEVEL as LogLevel,
   acceptGroups: false,
   acceptTypes: ["text"],
-  networks:  ["dev"],
+  networks: ["dev"],
   connectionTimeout: 30000,
   autoReconnect: true,
   welcomeMessage: "",
