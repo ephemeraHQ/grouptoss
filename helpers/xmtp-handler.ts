@@ -15,7 +15,7 @@ import {
   type XmtpEnv,
 } from "@xmtp/node-sdk";
 import "dotenv/config";
-import { preMessageHandler } from   "./xmtp-other";
+import { preMessageHandler } from   "./xmtp-skills";
 /**
  * Configuration options for the XMTP agent
  */
