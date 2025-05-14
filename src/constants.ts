@@ -22,6 +22,15 @@ export const networks = [
      networkId: "base-mainnet",
    },
 ];
+export const COMMANDS=`
+Other commands:
+- @toss join - To show the payment buttons for the toss
+- @toss close <option> - Close the toss and set the winning option (only for toss creator)
+- @toss refresh - Check for new payments to the toss wallet and refresh status
+- @toss status - Check the status of the current toss
+- @toss help - Show this help message`
+
+
 const filteredNetworks = networks.filter((network) => network.networkId === NETWORK_ID);
 // Help message for users
 export const HELP_MESSAGE = `To create a toss using natural language: 
@@ -34,12 +43,9 @@ for example:
 
 When a toss is created, users can join by clicking on the payment buttons for your preferred option.
 
-Other commands:
-- @toss join - To show the payment buttons for the toss
-- @toss close <option> - Close the toss and set the winning option (only for toss creator)
-- @toss status - Check the status of the current toss
-- @toss help - Show this help message
+${COMMANDS}
 `;
+
 
 // Agent instructions template
 export const AGENT_INSTRUCTIONS = `
@@ -71,14 +77,7 @@ export const AGENT_INSTRUCTIONS = `
      - The transfer is completed successfully
      - Provide transaction details
   
-  Available commands:
-  @toss <topic> <options> <amount> - Create a new toss
-  /join <tossId> <option> - Join an existing toss with the specified ID
-  /close <tossId> <option> - Close the toss and set the winning option (creator only)
-  /status <tossId> - Check toss status and participants
-  /list - List all active tosses
-  /balance - Check your wallet balance
-  /help - Show available commands
+   ${COMMANDS}
   
   Keep responses concise and clear, focusing on payment verification and toss status.
 `; 

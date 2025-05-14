@@ -592,7 +592,7 @@ export class TossManager {
       const command = commandParts[0].toLowerCase();
 
       // Handle explicit commands
-      if (["join", "close", "help", "balance", "status"].includes(command)) {
+      if (["join", "close", "help", "balance", "status", "refresh"].includes(command)) {
         return this.handleExplicitCommand(
           command, 
           commandParts.slice(1), 
@@ -627,13 +627,10 @@ export class TossManager {
       }Toss Amount: ${toss.tossAmount} USDC\n\nTo join, select an option below:`;
       
       await conversation.send(responseText);
+      await this.sendJoinOptions(client, conversation, toss, message.senderInboxId);
+     
       
-      // Send option buttons if there are exactly two options
-      if (toss.tossOptions?.length === 2) {
-        await this.sendJoinOptions(client, conversation, toss, message.senderInboxId);
-      } else {
-        await conversation.send("You can join by using the command: @toss join <option>");
-      }
+      await conversation.send("If the transaction is not showing up, please use the command: @toss refresh");
       
       return ""; // Empty string since we've sent responses directly
     } catch (error) {
@@ -642,7 +639,7 @@ export class TossManager {
   }
 
   /**
-   * Handle explicit commands (join, close, help, balance, status)
+   * Handle explicit commands (join, close, help, balance, status, refresh)
    */
   async handleExplicitCommand(
     command: string,
@@ -668,6 +665,17 @@ export class TossManager {
         if (!toss) return "No active toss found in this group.";
         
         return this.formatTossStatus(toss);
+      }
+      
+      case "refresh": {
+        if (!conversationId) return "Tosses are only supported in group chats.";
+        
+        const toss = await this.getActiveTossForConversation(conversationId);
+        if (!toss) return "No active toss found in this group.";
+        
+        await conversation.send("⏳ Refreshing toss status and checking for payments...");
+        const refreshResult = await this.refreshTossTransactions(toss, client, conversation, inboxId);
+        return refreshResult;
       }
       
       case "join": {
@@ -1248,4 +1256,122 @@ export class TossManager {
       return response;
     }
   }
-} 
+
+  /**
+   * Refresh toss status by checking for transactions to the toss wallet
+   */
+  async refreshTossTransactions(
+    toss: GroupTossName,
+    client: Client,
+    conversation: Conversation,
+    requestorInboxId: string
+  ): Promise<string> {
+    try {
+      console.log(`🔄 Refreshing transactions for toss ${toss.id} with wallet ${toss.walletAddress}`);
+      this.setClient(client);
+      
+      // Get latest toss data to ensure we're working with current state
+      const currentToss = await this.getToss(toss.id);
+      if (!currentToss) {
+        return "⚠️ Could not find toss data.";
+      }
+      
+      // Get USDC balance of the toss wallet
+      const tossWallet = await this.walletService.getWallet(toss.id);
+      if (!tossWallet) {
+        return "⚠️ Could not find toss wallet.";
+      }
+      
+      // Check wallet balance
+      const { balance } = await this.walletService.checkBalance(toss.id);
+      console.log(`📊 Toss wallet balance: ${balance} USDC`);
+      
+      // Calculate expected balance based on number of current participants
+      const tossAmount = parseFloat(currentToss.tossAmount);
+      const expectedBalance = tossAmount * currentToss.participants.length;
+      
+      // If the actual balance is higher than expected, we likely have new payments
+      if (balance > expectedBalance) {
+        console.log(`🔍 Balance higher than expected: ${balance} > ${expectedBalance}, searching for new participants...`);
+        
+        // refresh status of the toss
+        console.log(`🔄 Analyzing toss ${currentToss.id} to find new participants...`);
+        
+        try {
+          // Get all members in the conversation
+          const members = await conversation.members();
+          console.log(`Group has ${members.length} members`);
+          
+          // Get the current toss amount
+          const tossAmount = parseFloat(currentToss.tossAmount);
+          
+          // Track added participants
+          let newParticipantsAdded = 0;
+          
+          // Check wallet balance to confirm payments
+          const { balance } = await this.walletService.checkBalance(toss.id);
+          console.log(`Toss wallet balance: ${balance} USDC`);
+          console.log(`Current participants: ${currentToss.participants.length}`);
+          console.log(`Expected balance if all current participants paid: ${tossAmount * currentToss.participants.length} USDC`);
+          
+          // If balance indicates more participants than we have recorded
+          const expectedAdditionalParticipants = Math.floor((balance - (tossAmount * currentToss.participants.length)) / tossAmount);
+          console.log(`Balance suggests ${expectedAdditionalParticipants} additional participants`);
+          
+          if (expectedAdditionalParticipants > 0) {
+            // Find members who aren't already participants
+            const potentialNewParticipants = members.filter(member => 
+              member.inboxId.toLowerCase() !== client.inboxId.toLowerCase() && 
+              !currentToss.participants.includes(member.inboxId)
+            );
+            
+            console.log(`Found ${potentialNewParticipants.length} potential new participants to add`);
+            
+            // Add up to the expected number of new participants
+            for (let i = 0; i < Math.min(expectedAdditionalParticipants, potentialNewParticipants.length); i++) {
+              const member = potentialNewParticipants[i];
+              
+              // Get default option (first option or "heads")
+              const defaultOption = currentToss.tossOptions && currentToss.tossOptions.length > 0 
+                ? currentToss.tossOptions[0] 
+                : "heads";
+              
+              console.log(`⏩ Adding ${member.inboxId} as a participant with option ${defaultOption}`);
+              
+              // Explicitly update the toss object with the new participant
+              currentToss.participants.push(member.inboxId);
+              currentToss.participantOptions.push({
+                inboxId: member.inboxId,
+                option: defaultOption
+              });
+              
+              // Save after each participant is added to ensure data is persisted
+              await this.storage.saveData(STORAGE_CATEGORIES.TOSS, currentToss.id, currentToss);
+              newParticipantsAdded++;
+              
+              console.log(`✅ Successfully added ${member.inboxId} to toss ${currentToss.id}`);
+            }
+            
+            // Notify the group about new participants
+            if (newParticipantsAdded > 0) {
+              await conversation.send(`✅ Found ${newParticipantsAdded} unprocessed payments to the toss, adding them.`);
+            } 
+          } else {
+            console.log(`No additional participants detected based on wallet balance`);
+            await conversation.send(`No missing transactions found.`);
+          }
+          
+        } catch (refreshError) {
+          console.error(`Error finding new participants: ${refreshError}`);
+          await conversation.send(`⚠️ Error finding new participants: ${refreshError instanceof Error ? refreshError.message : String(refreshError)}`);
+        }
+      }
+      
+      // Return current status
+      return `Current status:\n\n${this.formatTossStatus(currentToss)}`;
+    } catch (error) {
+      console.error("Error refreshing toss transactions:", error);
+      return `⚠️ Error refreshing toss: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+}
