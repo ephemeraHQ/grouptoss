@@ -18,7 +18,7 @@
     "@langchain/openai": "latest",
     "@xmtp/content-type-transaction-reference": "^2.0.2",
     "@xmtp/content-type-wallet-send-calls": "^1.0.1",
-    "@xmtp/node-sdk": "2.1.0-rc3",
+    "@xmtp/node-sdk": "2.0.8",
     "dotenv": "^16.4.7",
     "rimraf": "^6.0.1",
     "uint8arrays": "^5.1.0",
