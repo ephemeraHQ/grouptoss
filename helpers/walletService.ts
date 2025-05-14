@@ -55,14 +55,14 @@ export async function initializeAgent(userId: string, instruction: string) {
   try {
     // Check if we already have an agent for this user
     if (userId in agentStore) {
-      console.log(`Using existing agent for user: ${userId}`);
+      console.debug(`Using existing agent for user: ${userId}`);
       const agentConfig = {
         configurable: { thread_id: `Agent for ${userId}` },
       };
       return { agent: agentStore[userId], config: agentConfig };
     }
 
-    console.log(`Initializing agent for user: ${userId}`);
+    console.debug(`Initializing agent for user: ${userId}`);
 
     const llm = new ChatOpenAI({
       modelName: "gpt-4.1",
@@ -85,16 +85,16 @@ export async function initializeAgent(userId: string, instruction: string) {
       ],
     });
 
-    console.log("AgentKit initialized successfully");
+    console.debug("AgentKit initialized successfully");
 
     const tools = await getLangChainTools(agentkit);
 
     // Get or create memory saver for this user
     if (!(userId in memoryStore)) {
-      console.log(`Creating new memory store for user: ${userId}`);
+      console.debug(`Creating new memory store for user: ${userId}`);
       memoryStore[userId] = new MemorySaver();
     } else {
-      console.log(`Using existing memory store for user: ${userId}`);
+      console.debug(`Using existing memory store for user: ${userId}`);
     }
 
     const agentConfig = {
@@ -111,7 +111,7 @@ export async function initializeAgent(userId: string, instruction: string) {
     // Store the agent for future use
     agentStore[userId] = agent;
 
-    console.log("Agent created successfully");
+    console.debug("Agent created successfully");
     return { agent, config: agentConfig };
   } catch (error) {
     console.error("Failed to initialize agent:", error);
@@ -125,7 +125,7 @@ function initializeCoinbaseSDK(): boolean {
       apiKeyName: CDP_API_KEY_NAME,
       privateKey: CDP_API_KEY_PRIVATE_KEY,
     });
-    console.log("Coinbase SDK initialized successfully, network:", NETWORK_ID);
+    console.debug("Coinbase SDK initialized successfully, network:", NETWORK_ID);
     return true;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -149,7 +149,7 @@ export class WalletService {
 
   async createWallet(userId: string): Promise<WalletInfo> {
     try {
-      console.log(`Creating new wallet for user ${userId}...`);
+      console.debug(`Creating new wallet for user ${userId}...`);
 
       // Initialize SDK if not already done
       if (!sdkInitialized) {
@@ -157,7 +157,7 @@ export class WalletService {
       }
 
       // Log the network we're using
-      console.log(`Creating wallet on network: ${NETWORK_ID}`);
+      console.debug(`Creating wallet on network: ${NETWORK_ID}`);
 
       // Create wallet
       const wallet = await Wallet.create({
@@ -169,10 +169,10 @@ export class WalletService {
         throw err;
       });
 
-      console.log("Wallet created successfully, exporting data...");
+      console.debug("Wallet created successfully, exporting data...");
       const data = wallet.export();
 
-      console.log("Getting default address...");
+      console.debug("Getting default address...");
       const address = await wallet.getDefaultAddress();
       const walletAddress = address.getId();
 
@@ -193,7 +193,7 @@ export class WalletService {
           userId: walletInfo.userId,
         })
       );
-      console.log("Wallet created and saved successfully");
+      console.debug("Wallet created and saved successfully");
       return walletInfo;
     } catch (error: unknown) {
       console.error("Failed to create wallet:", error);
@@ -210,7 +210,7 @@ export class WalletService {
   async getWallet(userId: string): Promise<WalletInfo | undefined> {
     const walletData = await this.storage.getWallet(userId);
     if (walletData === null) {
-        console.log(`No wallet found ${userId}, creating new one`);
+        console.debug(`No wallet found ${userId}, creating new one`);
         return this.createWallet(userId);
     }
 
@@ -243,7 +243,7 @@ export class WalletService {
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.log(`Error looking up wallet by address: ${errorMessage}`);
+      console.debug(`Error looking up wallet by address: ${errorMessage}`);
     }
 
     return null;
@@ -261,10 +261,10 @@ export class WalletService {
     
     toAddress = toAddress.toLowerCase();
 
-    console.log("📤 TRANSFER INITIATED");
-    console.log(`💸 Amount: ${amount} USDC`);
-    console.log(`🔍 From user: ${fromUserId}`);
-    console.log(`🔍 To: ${toAddress}`);
+    console.debug("📤 TRANSFER INITIATED");
+    console.debug(`💸 Amount: ${amount} USDC`);
+    console.debug(`🔍 From user: ${fromUserId}`);
+    console.debug(`🔍 To: ${toAddress}`);
 
     // Validate amount is not above the maximum limit
     if (amount > this.maxTransferAmount) {
@@ -273,13 +273,13 @@ export class WalletService {
     }
 
     // Get the source wallet
-    console.log(`🔑 Retrieving source wallet for user: ${fromUserId}...`);
+    console.debug(`🔑 Retrieving source wallet for user: ${fromUserId}...`);
     const from = await this.getWallet(fromUserId);
     if (!from) {
       console.error(`❌ No wallet found for sender: ${fromUserId}`);
       return undefined;
     }
-    console.log(`✅ Source wallet found: ${from.address}`);
+    console.debug(`✅ Source wallet found: ${from.address}`);
 
     if (!Number(amount)) {
       console.error(`❌ Invalid amount: ${amount}`);
@@ -287,9 +287,9 @@ export class WalletService {
     }
 
     // Check balance
-    console.log(`💰 Checking balance for source wallet: ${from.address}...`);
+    console.debug(`💰 Checking balance for source wallet: ${from.address}...`);
     const balance = await from.wallet?.getBalance(Coinbase.assets.Usdc);
-    console.log(`💵 Available balance: ${Number(balance)} USDC`);
+    console.debug(`💵 Available balance: ${Number(balance)} USDC`);
 
     if (Number(balance) < amount) {
       console.error(
@@ -308,20 +308,20 @@ export class WalletService {
 
     // Get or validate destination wallet
     let destinationAddress = toAddress;
-    console.log(`🔑 Validating destination: ${toAddress}...`);
+    console.debug(`🔑 Validating destination: ${toAddress}...`);
 
     // Check if this address belongs to a wallet in our system
     const existingWallet = await this.getWalletByAddress(toAddress);
     if (existingWallet) {
       // Use the address from our system
-      console.log(`✅ Using existing wallet with address: ${existingWallet.address}`);
+      console.debug(`✅ Using existing wallet with address: ${existingWallet.address}`);
       destinationAddress = existingWallet.address;
     } else {
-      console.log(`ℹ️ Using raw address as destination: ${destinationAddress}`);
+      console.debug(`ℹ️ Using raw address as destination: ${destinationAddress}`);
     }
 
     try {
-      console.log(
+      console.debug(
         `🚀 Executing transfer of ${amount} USDC from ${from.address} to ${destinationAddress}...`
       );
       const transfer = await from.wallet?.createTransfer({
@@ -337,7 +337,7 @@ export class WalletService {
       }
       try {
         await transfer.wait();
-        console.log("Transfer has been confirmed:","URL:",await transfer.getTransactionLink(),"Hash:",await transfer.getTransactionHash());
+        console.debug("Transfer has been confirmed:","URL:",await transfer.getTransactionLink(),"Hash:",await transfer.getTransactionHash());
       } catch (error: unknown) {
         console.error("Error while waiting for transfer to complete:", error);
       }

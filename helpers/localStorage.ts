@@ -31,7 +31,6 @@ export class FileStorage implements WalletStorage {
     });
 
     this.initialized = true;
-    console.log("Local file storage initialized");
   }
 
   /**

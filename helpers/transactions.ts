@@ -190,27 +190,27 @@ export async function checkTransactionWithRetries(
   let currentDelay = initialDelay;
   
   // Wait before the first check
-  console.log(`Waiting ${Math.round(currentDelay / 1000)}s before checking transaction ${txHash}...`);
+  console.debug(`Waiting ${Math.round(currentDelay / 1000)}s before checking transaction ${txHash}...`);
   await sleep(currentDelay);
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`Checking transaction ${txHash}, attempt ${attempt + 1}/${maxRetries + 1}`);
+      console.debug(`Checking transaction ${txHash}, attempt ${attempt + 1}/${maxRetries + 1}`);
       
       // Try to verify the transaction
       const txDetails = await verifyTransaction(txHash);
       
       if (txDetails) {
-        console.log(`Transaction ${txHash} found with status: ${txDetails.status}`);
+        console.debug(`Transaction ${txHash} found with status: ${txDetails.status}`);
         return txDetails;
       }
       
       if (attempt === maxRetries) {
-        console.log(`Transaction ${txHash} not found after ${maxRetries + 1} attempts`);
+        console.debug(`Transaction ${txHash} not found after ${maxRetries + 1} attempts`);
         return null;
       }
       
-      console.log(`Transaction ${txHash} not found, retrying in ${Math.round(currentDelay / 1000)}s...`);
+      console.debug(`Transaction ${txHash} not found, retrying in ${Math.round(currentDelay / 1000)}s...`);
       await sleep(currentDelay);
       
       // Increase delay for next attempt
@@ -241,7 +241,7 @@ export async function sendTransactionReference(
       networkId: networkConfig.chainId,
       reference: transactionHash,
     };
-    console.log(`Sending transaction reference: ${transactionHash}`);
+    console.debug(`Sending transaction reference: ${transactionHash}`);
     await conversation.send(transactionReference, ContentTypeTransactionReference);
     return true;
   } catch (error) {
