@@ -9,6 +9,7 @@ import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls";
 import { checkTransactionWithRetries, createUSDCTransferCalls, extractERC20TransferData, sendTransactionReference } from "../helpers/transactions";
 import { extractTossData, extractSelectedOption, extractOptionFromTransferAmount } from "./transaction-parser";
+import { AgentOptions } from "@helpers/xmtp-handler";
 
 
 export function customJSONStringify(obj: any, space?: number | string): string {
@@ -18,14 +19,7 @@ export function customJSONStringify(obj: any, space?: number | string): string {
      : value
  , space);
 }
-/**
-* Extract command from message content
-*/
-export function extractCommand(content: string): string | null {
- const botMentionRegex = /@toss\s+(.*)/i;
- const botMentionMatch = content.match(botMentionRegex);
- return botMentionMatch ? botMentionMatch[1].trim() : null;
-}
+
 // Storage categories
 const STORAGE_CATEGORIES = {
   TOSS: "tosses"
@@ -571,25 +565,32 @@ export class TossManager {
     client: Client,
     conversation: Conversation,
     message: DecodedMessage,
-    isDm: boolean,
+    messageContext: {
+      isDm: boolean;
+      options: AgentOptions;
+      hasCommand: boolean;
+      isTransaction: boolean;
+      command: string;
+      commandData: { name: string; args: string[] };
+    },
     agent: ReturnType<typeof createReactAgent>,
     agentConfig: AgentConfig,
   ): Promise<string> {
     try {
       const conversationId = conversation.id;
-      const commandContent = (message.content as string).replace(/^@toss\s+/i, "").trim();
+      const commandContent = (message.content as string).replace(new RegExp(`^${messageContext.options.commandPrefix?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+`, 'i'), "").trim();
       const commandParts = commandContent.split(" ");
       const command = commandParts[0].toLowerCase();
 
-      // Handle explicit commands
-      if (["join", "close", "help", "balance", "status", "refresh"].includes(command)) {
+      // Handle explicit commands using the provided allowedCommands list
+      if (messageContext.options.allowedCommands?.map(cmd => cmd.toLowerCase()).includes(command)) {
         return this.handleExplicitCommand(
           command, 
           commandParts.slice(1), 
           message.senderInboxId, 
           client,
           conversation,
-          isDm
+          messageContext.isDm
         );
       }
       

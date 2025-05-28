@@ -1058,23 +1058,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@xmtp/node-bindings@npm:1.1.8":
-  version: 1.1.8
-  resolution: "@xmtp/node-bindings@npm:1.1.8"
-  checksum: 10c0/60a938826f94bea4b3b7ba2371b4259d7bd4a8405a7caa884145f4727c3a314a1fec403edcd67647b1535e4856cb9ffb9cc62f54eb15679cd2b0e36aeea74b2c
+"@xmtp/node-bindings@npm:1.2.0-rc4":
+  version: 1.2.0-rc4
+  resolution: "@xmtp/node-bindings@npm:1.2.0-rc4"
+  checksum: 10c0/22b4d356271492f2991f1f11a51afbd9cc61708574b4fda851a308d62f45d59da885a9112405542beb91eeaff6754d10e7475e20c5435766962b09e6625555b7
   languageName: node
   linkType: hard
 
-"@xmtp/node-sdk@npm:2.0.8":
-  version: 2.0.8
-  resolution: "@xmtp/node-sdk@npm:2.0.8"
+"@xmtp/node-sdk@npm:2.1.0-rc4":
+  version: 2.1.0-rc4
+  resolution: "@xmtp/node-sdk@npm:2.1.0-rc4"
   dependencies:
     "@xmtp/content-type-group-updated": "npm:^2.0.2"
     "@xmtp/content-type-primitives": "npm:^2.0.2"
     "@xmtp/content-type-text": "npm:^2.0.2"
-    "@xmtp/node-bindings": "npm:1.1.8"
+    "@xmtp/node-bindings": "npm:1.2.0-rc4"
     "@xmtp/proto": "npm:^3.78.0"
-  checksum: 10c0/98715b3d443175f408c7a84c0490ee21bfc9b4d8be9b8143779977bcc0f4f1bfaa5020931e77c3f7c8d1f48cd1f0012d19251c9f61e670cdb5d50787954a9459
+  checksum: 10c0/35f6ba73b8ef791ed84b7f7f6a2a3831ea8cdfd642bda01c5427818fdbca508de2c6e9034b736ad2f18fa7410601fc3725ce6928dc8f11416d6c496bd736bf5a
   languageName: node
   linkType: hard
 
@@ -2108,7 +2108,7 @@ __metadata:
     "@langchain/openai": "npm:latest"
     "@xmtp/content-type-transaction-reference": "npm:^2.0.2"
     "@xmtp/content-type-wallet-send-calls": "npm:^1.0.1"
-    "@xmtp/node-sdk": "npm:2.0.8"
+    "@xmtp/node-sdk": "npm:2.1.0-rc4"
     dotenv: "npm:^16.4.7"
     rimraf: "npm:^6.0.1"
     tsx: "npm:^4.19.2"

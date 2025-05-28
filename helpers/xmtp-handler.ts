@@ -1,11 +1,4 @@
 import {
-  createSigner,
-  generateEncryptionKeyHex,
-  getDbPath,
-  getEncryptionKeyFromHex,
-  logAgentDetails,
-} from "./client";
-import {
   Client,
   Dm,
   Group,
@@ -14,8 +7,20 @@ import {
   type LogLevel,
   type XmtpEnv,
 } from "@xmtp/node-sdk";
+import {
+  createSigner,
+  generateEncryptionKeyHex,
+  getDbPath,
+  getEncryptionKeyFromHex,
+  logAgentDetails,
+} from "./client";
 import "dotenv/config";
-import { preMessageHandler } from   "./xmtp-skills";
+import {
+  getCommandConfig,
+  preMessageHandler,
+  processMessageCommands,
+} from "./xmtp-skills";
+
 /**
  * Configuration options for the XMTP agent
  */
@@ -27,6 +32,7 @@ export interface AgentOptions {
   dbEncryptionKey?: string;
   /** Networks to connect to (default: ['dev', 'production']) */
   networks?: string[];
+  /** Logging level */
   loggingLevel?: LogLevel;
   /** Public key of the agent */
   publicKey?: string;
@@ -42,6 +48,22 @@ export interface AgentOptions {
   groupWelcomeMessage?: string;
   /** Codecs to use */
   codecs?: any[];
+  /** Allowed commands that the agent will respond to */
+  allowedCommands?: string[];
+  /** Command prefix (default: "@toss") */
+  commandPrefix?: string;
+}
+
+/**
+ * Message context with analysis results
+ */
+export interface MessageContext {
+  isDm: boolean;
+  options: AgentOptions;
+  isTransaction: boolean;
+  command: string;
+  hasCommand: boolean;
+  commandData: { name: string; args: string[] };
 }
 
 /**
@@ -51,13 +73,12 @@ type MessageHandler = (
   client: Client,
   conversation: Conversation,
   message: DecodedMessage,
-  isDm: boolean,
+  messageContext: MessageContext,
 ) => Promise<void> | void;
 
 // Constants
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 2000;
-const SYNC_INTERVAL_MINUTES = 10;
 const DEFAULT_AGENT_OPTIONS: AgentOptions = {
   walletKey: "",
   dbEncryptionKey: process.env.ENCRYPTION_KEY ?? generateEncryptionKeyHex(),
@@ -70,6 +91,8 @@ const DEFAULT_AGENT_OPTIONS: AgentOptions = {
   autoReconnect: true,
   welcomeMessage: "",
   codecs: [],
+  allowedCommands: ["help"],
+  commandPrefix: "@toss",
 };
 
 // Helper functions
@@ -109,8 +132,6 @@ export const initializeClient = async (
         if (retryCount === 0) {
           backoffTime = RETRY_DELAY_MS;
         }
-
-        console.debug(`[${env}] Syncing conversations...`); 
         await client.conversations.sync();
         console.debug(`[${env}] Waiting for messages...`);
         const streamPromise = client.conversations.streamAllMessages();
@@ -143,16 +164,48 @@ export const initializeClient = async (
             const isDm = conversation instanceof Dm;
             const isGroup = conversation instanceof Group;
 
-            const preMessageHandlerResult = await preMessageHandler(client, conversation, message, isDm, options);   
-            if(preMessageHandlerResult){ 
-              console.debug(`[${env}] Pre-message handler returned true, skipping`);
+            const preMessageHandlerResult = await preMessageHandler(
+              client,
+              conversation,
+              message,
+              isDm,
+              options,
+            );
+            if (preMessageHandlerResult) {
+              console.debug(
+                `[${env}] Pre-message handler returned true, skipping`,
+              );
               continue;
             }
-          
+
             if (isDm || (isGroup && options.acceptGroups)) {
               try {
-                console.debug(`[${env}] Processing message ${message.content}...`);
-                await messageHandler(client, conversation, message, isDm);
+                console.debug(
+                  `[${env}] Processing message ${message.content as string}...`,
+                );
+
+                // Get command configuration and analyze message
+                const commandConfig = getCommandConfig(options);
+                const analysis = processMessageCommands(
+                  message,
+                  commandConfig.prefix,
+                );
+
+                const messageContext: MessageContext = {
+                  isDm,
+                  options,
+                  isTransaction: analysis.isTransaction,
+                  command: analysis.command || "",
+                  hasCommand: analysis.hasCommand,
+                  commandData: analysis.commandData || { name: "", args: [] },
+                };
+
+                await messageHandler(
+                  client,
+                  conversation,
+                  message,
+                  messageContext,
+                );
               } catch (handlerError) {
                 console.error(
                   `[${env}] Error in message handler:`,
@@ -210,36 +263,16 @@ export const initializeClient = async (
     }
   };
 
-  // Setup simple watchdog to sync every 10 minutes
-  const setupWatchdog = (client: Client, env: string) => {
-    const SYNC_INTERVAL_MS = SYNC_INTERVAL_MINUTES * 60 * 1000;
-    
-    const syncInterval = setInterval(() => {
-      console.debug(`[${env}] Watchdog: Running scheduled sync`);
-      client.conversations.sync()
-        .then(() => {
-          console.debug(`[${env}] Watchdog: Sync completed`);
-        })
-        .catch((error: unknown) => {
-          console.error(`[${env}] Watchdog: Sync failed:`, error);
-        });
-    }, SYNC_INTERVAL_MS);
-
-    process.on("beforeExit", () => {
-      clearInterval(syncInterval);
-    });
-  };
-
   const clients: Client[] = [];
   const streamPromises: Promise<void>[] = [];
 
   for (const option of mergedOptions) {
     for (const env of option.networks ?? []) {
       try {
-        console.debug(`[${env}] Initializing client...`);
-
         const signer = createSigner(option.walletKey);
-        const dbEncryptionKey = getEncryptionKeyFromHex(option.dbEncryptionKey as string)  
+        const dbEncryptionKey = getEncryptionKeyFromHex(
+          option.dbEncryptionKey as string,
+        );
         const signerIdentifier = (await signer.getIdentifier()).identifier;
 
         const client = await Client.create(signer, {
@@ -252,15 +285,10 @@ export const initializeClient = async (
 
         clients.push(client);
 
-        // Setup simple watchdog to sync every 10 minutes
-        setupWatchdog(client, env);
-
         // Start message streaming
-        const streamPromise = streamMessages(
-          client,
-          messageHandler,
-          { ...option }
-        );
+        const streamPromise = streamMessages(client, messageHandler, {
+          ...option,
+        });
 
         streamPromises.push(streamPromise);
       } catch (error) {
@@ -269,7 +297,7 @@ export const initializeClient = async (
     }
   }
 
-  logAgentDetails(clients);
+  await logAgentDetails(clients);
 
   //await Promise.all(streamPromises);
   return clients;
