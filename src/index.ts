@@ -1,38 +1,23 @@
 import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
 import { initializeAgent } from "@helpers/walletService";
-import { AgentOptions, initializeClient } from "@helpers/xmtp-handler";
+import { AgentOptions, initializeClient, MessageContext } from "@helpers/xmtp-handler";
 import { AGENT_INSTRUCTIONS, DEFAULT_AMOUNT, DEFAULT_OPTIONS, MAX_USDC_AMOUNT } from "./constants";
 import {  ParsedToss, StreamChunk, TossJsonResponse } from "./types";
-import { extractCommand, TossManager } from "./toss-manager";     
+import { TossManager } from "./toss-manager";     
 import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
-import { ContentTypeTransactionReference, TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
+import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
 import { WalletService } from "../helpers/walletService";
 import {  storage } from "../helpers/localStorage";  
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
-
 import { AgentConfig } from "./types";
 import { HumanMessage } from "@langchain/core/messages";
 
 
-/**
- * Extract JSON from agent response text
- * @param response The text response from agent
- * @returns Parsed JSON object or null if not found
- */
-export function extractJsonFromResponse(
-  response: string
-): TossJsonResponse | null {
-  try {
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as TossJsonResponse;
-    }
-    return null;
-  } catch (error) {
-    console.error("Error parsing JSON from agent response:", error);
-    return null;
-  }
-}
+// Initialize wallet service and toss manager with proper dependencies
+const walletService = new WalletService(storage, 100); // 100 is the max transfer amount
+const tossManager = new TossManager(walletService, storage);
+
+
 /**
  * Process a message with the agent
  */
@@ -118,7 +103,16 @@ export async function parseNaturalLanguageToss(
 
   // Process with agent
   const response = await processAgentMessage(agent, config, parsingRequest);
-  const parsedJson = extractJsonFromResponse(response);
+  let parsedJson: TossJsonResponse | null = null;
+  try {
+    const json = response.match(/\{[\s\S]*\}/);
+    if (json) { 
+      parsedJson = JSON.parse(json[0]) as TossJsonResponse;
+    }
+  } catch (error) {
+    console.error("Error parsing JSON from agent response:", error);
+      return "Invalid toss request: No JSON found in response";
+  }
 
   if (!parsedJson) {
     return "Invalid toss request: No JSON found in response";
@@ -148,68 +142,6 @@ export async function parseNaturalLanguageToss(
     amount: amount,
   };
 } 
-/**
- * Main entry point for command processing
- */
-export async function handleCommand(
-  client: Client,
-  conversation: Conversation,
-  message: DecodedMessage,
-  isDm: boolean,
-  tossManager: TossManager,
-  agent: ReturnType<typeof createReactAgent>,
-  agentConfig: AgentConfig,
-): Promise<string> {
-  return tossManager.handleCommand(
-    client, 
-    conversation, 
-    message, 
-    isDm, 
-    agent, 
-    agentConfig
-  );
-}
-
-/**
- * Handle explicit commands (join, close, help, balance, status)
- */
-export async function handleExplicitCommand(
-  command: string,
-  args: string[],
-  inboxId: string,
-  tossManager: TossManager,
-  client: Client,
-  conversation: Conversation,
-  isDm: boolean
-): Promise<string> {
-  return tossManager.handleExplicitCommand(
-    command, 
-    args, 
-    inboxId, 
-    client, 
-    conversation, 
-    isDm
-  );
-}
-
-/**
- * Process a transaction reference that might be related to a toss
- */
-export async function handleTransactionReference(
-  client: Client,
-  conversation: Conversation,
-  message: DecodedMessage,
-  tossManager: TossManager
-): Promise<void> {
-  await tossManager.handleTransactionReference(client, conversation, message);
-}
-
-/**
- * Checks if a message is a transaction reference
- */
-export function isTransactionReference(message: DecodedMessage): boolean {
-  return message.contentType?.typeId === ContentTypeTransactionReference.toString();
-}
 
 
 /**
@@ -219,55 +151,52 @@ async function processMessage(
   client: Client,
   conversation: Conversation,
   message: DecodedMessage,
-  isDm: boolean,
+  messageContext: MessageContext
 ): Promise<void> {
   try {
-    
-    // Initialize wallet service and toss manager with proper dependencies
-    const walletService = new WalletService(storage, 100); // 100 is the max transfer amount
-    const tossManager = new TossManager(walletService, storage);
     // Set the client for direct transfers
     tossManager.setClient(client);
     
     const inboxId = message.senderInboxId;
+    
     // Handle transaction references
-    if (message.contentType?.typeId === "transactionReference") {
+    if (messageContext.isTransaction) {
       await conversation.send("⏳ Fetching transaction details...");
-      await handleTransactionReference(client, conversation, message, tossManager);
+      await tossManager.handleTransactionReference(client, conversation, message);
       return;
     }
-    
     
     // Handle text commands
-    const command = extractCommand(message.content as string);
-    if (!command) {
+    if (messageContext.hasCommand && messageContext.command) {
+      // Initialize agent
+      const { agent, config } = await initializeAgent(
+        inboxId,
+        AGENT_INSTRUCTIONS
+      );
+
+      // Process command
+      const response = await tossManager.handleCommand(
+        client, 
+        conversation, 
+        message, 
+        messageContext, 
+        agent, 
+        config,
+      );
+      
+      await conversation.send(response);
+      
       return;
     }
-
-    // Initialize agent
-    const { agent, config } = await initializeAgent(
-      inboxId,
-      AGENT_INSTRUCTIONS
-    );
-
-    // Process command
-    const response = await handleCommand(
-      client,
-      conversation,
-      message,
-      isDm,
-      tossManager,
-      agent,
-      config
-    );
-    if (response) {
-      await conversation.send(response);
-      console.log(`✅ Response sent: ${response.substring(0, 50)}...`);
-    }
+    
+    // No command or transaction found - nothing to process
+    console.debug(`No command or transaction found in message: ${message.content}`);
+    
   } catch (error) {
     console.error("Error:", error);
   }
 }
+
 
 // Initialize client
 const options: AgentOptions = { 
@@ -278,6 +207,8 @@ const options: AgentOptions = {
   welcomeMessage: "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
   groupWelcomeMessage: "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
   codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
+  commandPrefix: "@toss",
+  allowedCommands: ["help", "join", "close", "balance", "status", "refresh", "create"], // All commands this bot should handle
 }
 await initializeClient(processMessage, [options]);
 
