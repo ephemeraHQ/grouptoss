@@ -1,11 +1,4 @@
 import {
-  createSigner,
-  generateEncryptionKeyHex,
-  getDbPath,
-  getEncryptionKeyFromHex,
-  logAgentDetails,
-} from "./client";
-import {
   Client,
   Dm,
   Group,
@@ -14,9 +7,20 @@ import {
   type LogLevel,
   type XmtpEnv,
 } from "@xmtp/node-sdk";
+import {
+  createSigner,
+  generateEncryptionKeyHex,
+  getDbPath,
+  getEncryptionKeyFromHex,
+  logAgentDetails,
+} from "./client";
 import "dotenv/config";
-import { preMessageHandler, processMessageCommands, getCommandConfig } from "./xmtp-skills";
-import { isCommand, isTransactionReference } from "./xmtp-skills";
+import {
+  getCommandConfig,
+  preMessageHandler,
+  processMessageCommands,
+} from "./xmtp-skills";
+
 /**
  * Configuration options for the XMTP agent
  */
@@ -75,7 +79,6 @@ type MessageHandler = (
 // Constants
 const MAX_RETRIES = 6;
 const RETRY_DELAY_MS = 2000;
-const SYNC_INTERVAL_MINUTES = 10;
 const DEFAULT_AGENT_OPTIONS: AgentOptions = {
   walletKey: "",
   dbEncryptionKey: process.env.ENCRYPTION_KEY ?? generateEncryptionKeyHex(),
@@ -161,20 +164,33 @@ export const initializeClient = async (
             const isDm = conversation instanceof Dm;
             const isGroup = conversation instanceof Group;
 
-            const preMessageHandlerResult = await preMessageHandler(client, conversation, message, isDm, options);   
-            if(preMessageHandlerResult){ 
-              console.debug(`[${env}] Pre-message handler returned true, skipping`);
+            const preMessageHandlerResult = await preMessageHandler(
+              client,
+              conversation,
+              message,
+              isDm,
+              options,
+            );
+            if (preMessageHandlerResult) {
+              console.debug(
+                `[${env}] Pre-message handler returned true, skipping`,
+              );
               continue;
             }
-          
+
             if (isDm || (isGroup && options.acceptGroups)) {
               try {
-                console.debug(`[${env}] Processing message ${message.content}...`);
-                
+                console.debug(
+                  `[${env}] Processing message ${message.content as string}...`,
+                );
+
                 // Get command configuration and analyze message
                 const commandConfig = getCommandConfig(options);
-                const analysis = processMessageCommands(message, commandConfig.prefix);
-                
+                const analysis = processMessageCommands(
+                  message,
+                  commandConfig.prefix,
+                );
+
                 const messageContext: MessageContext = {
                   isDm,
                   options,
@@ -183,8 +199,13 @@ export const initializeClient = async (
                   hasCommand: analysis.hasCommand,
                   commandData: analysis.commandData || { name: "", args: [] },
                 };
-                
-                await messageHandler(client, conversation, message, messageContext);
+
+                await messageHandler(
+                  client,
+                  conversation,
+                  message,
+                  messageContext,
+                );
               } catch (handlerError) {
                 console.error(
                   `[${env}] Error in message handler:`,
@@ -248,9 +269,10 @@ export const initializeClient = async (
   for (const option of mergedOptions) {
     for (const env of option.networks ?? []) {
       try {
-
         const signer = createSigner(option.walletKey);
-        const dbEncryptionKey = getEncryptionKeyFromHex(option.dbEncryptionKey as string)  
+        const dbEncryptionKey = getEncryptionKeyFromHex(
+          option.dbEncryptionKey as string,
+        );
         const signerIdentifier = (await signer.getIdentifier()).identifier;
 
         const client = await Client.create(signer, {
@@ -264,11 +286,9 @@ export const initializeClient = async (
         clients.push(client);
 
         // Start message streaming
-        const streamPromise = streamMessages(
-          client,
-          messageHandler,
-          { ...option }
-        );
+        const streamPromise = streamMessages(client, messageHandler, {
+          ...option,
+        });
 
         streamPromises.push(streamPromise);
       } catch (error) {
@@ -277,7 +297,7 @@ export const initializeClient = async (
     }
   }
 
-  logAgentDetails(clients);
+  await logAgentDetails(clients);
 
   //await Promise.all(streamPromises);
   return clients;
