@@ -184,7 +184,7 @@ async function processMessage(
         config,
       );
       
-      await conversation.send(response);
+      response.length > 0 && await conversation.send(response);
       
       return;
     }

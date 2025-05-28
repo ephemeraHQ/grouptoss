@@ -129,8 +129,6 @@ export const initializeClient = async (
         if (retryCount === 0) {
           backoffTime = RETRY_DELAY_MS;
         }
-
-        console.debug(`[${env}] Syncing conversations...`); 
         await client.conversations.sync();
         console.debug(`[${env}] Waiting for messages...`);
         const streamPromise = client.conversations.streamAllMessages();
@@ -250,7 +248,6 @@ export const initializeClient = async (
   for (const option of mergedOptions) {
     for (const env of option.networks ?? []) {
       try {
-        console.debug(`[${env}] Initializing client...`);
 
         const signer = createSigner(option.walletKey);
         const dbEncryptionKey = getEncryptionKeyFromHex(option.dbEncryptionKey as string)  

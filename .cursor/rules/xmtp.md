@@ -253,9 +253,6 @@ async function main() {
   });
 
   logAgentDetails(client);
-
-  console.log("✓ Syncing conversations...");
-  /* Sync the conversations from the network to update the local db */
   await client.conversations.sync();
 
   // Start listening for messages

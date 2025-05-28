@@ -107,14 +107,26 @@ export function shouldProcessMessage(message: DecodedMessage, options: AgentOpti
   
   // Always process transaction references
   if (messageAnalysis.isTransaction) {
+    console.debug("Processing transaction reference");
     return true;
   }
   
-  // Process commands if they're in the allowed list
-  if (messageAnalysis.hasCommand && messageAnalysis.commandData) {
-    return isExplicitCommand(messageAnalysis.commandData.name, config.allowedCommands);
+  // Process any message that has the command prefix (both explicit commands and natural language prompts)
+  if (messageAnalysis.hasCommand) {
+    // If it's an explicit command, check if it's allowed
+    if (messageAnalysis.commandData && isExplicitCommand(messageAnalysis.commandData.name, config.allowedCommands)) {
+      console.debug(`Processing explicit command: ${messageAnalysis.commandData.name}`);
+      return true;
+    }
+    
+    // If it's not an explicit command, treat it as a natural language prompt and allow it
+    if (messageAnalysis.commandData && !isExplicitCommand(messageAnalysis.commandData.name, config.allowedCommands)) {
+      console.debug(`Processing natural language prompt: ${messageAnalysis.command}`);
+      return true;
+    }
   }
   
+  console.debug("Message filtered out - no command or transaction reference");
   return false;
 }
 
