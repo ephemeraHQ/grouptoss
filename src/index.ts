@@ -208,7 +208,7 @@ const options: AgentOptions = {
   groupWelcomeMessage: "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
   codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
   commandPrefix: "@toss",
-  allowedCommands: ["help", "join", "close", "balance", "status", "refresh", "create"], // All commands this bot should handle
+  allowedCommands: ["help", "join", "close", "balance", "status", "refresh", "create", "monitor"], // All commands this bot should handle
 }
 await initializeClient(processMessage, [options]);
 

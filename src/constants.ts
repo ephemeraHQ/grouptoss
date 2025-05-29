@@ -28,6 +28,7 @@ Other commands:
 - @toss close <option> - Close the toss and set the winning option (only for toss creator)
 - @toss refresh - Check for new payments to the toss wallet and refresh status
 - @toss status - Check the status of the current toss
+- @toss monitor - Show transaction monitoring status (debug)
 - @toss help - Show this help message`
 
 

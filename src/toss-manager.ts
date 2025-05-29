@@ -10,6 +10,7 @@ import { ContentTypeWalletSendCalls } from "@xmtp/content-type-wallet-send-calls
 import { checkTransactionWithRetries, createUSDCTransferCalls, extractERC20TransferData, sendTransactionReference } from "../helpers/transactions";
 import { extractTossData, extractSelectedOption, extractOptionFromTransferAmount } from "./transaction-parser";
 import { AgentOptions } from "@helpers/xmtp-handler";
+import { TransactionMonitor, TransactionEvent, MonitoredWallet } from "../helpers/transactionMonitor";
 
 
 export function customJSONStringify(obj: any, space?: number | string): string {
@@ -29,10 +30,158 @@ export class TossManager {
   private walletService: WalletService;
   private storage: FileStorage;
   private client?: Client;
+  private transactionMonitor: TransactionMonitor;
 
   constructor(walletService: WalletService, storage: FileStorage) {
     this.walletService = walletService;
     this.storage = storage;
+    this.transactionMonitor = new TransactionMonitor(storage);
+    this.setupTransactionMonitoring();
+  }
+
+  /**
+   * Setup transaction monitoring for automatic detection
+   */
+  private setupTransactionMonitoring(): void {
+    // Set up callback for when transactions are detected
+    this.transactionMonitor.onTransaction(async (event: TransactionEvent, wallet: MonitoredWallet) => {
+      try {
+        console.log(`🔔 Processing automatically detected transaction: ${event.hash}`);
+        await this.processDetectedTransaction(event, wallet);
+      } catch (error) {
+        console.error("Error processing detected transaction:", error);
+      }
+    });
+
+    // Start monitoring (30 second intervals)
+    this.transactionMonitor.startMonitoring(30000);
+  }
+
+  /**
+   * Process a transaction detected by the monitor
+   */
+  private async processDetectedTransaction(event: TransactionEvent, wallet: MonitoredWallet): Promise<void> {
+    if (!this.client) {
+      console.log("⚠️ No XMTP client set, cannot process detected transaction");
+      return;
+    }
+
+    try {
+      // Get the toss for this wallet
+      const toss = await this.getToss(wallet.tossId);
+      if (!toss) {
+        console.log(`⚠️ No toss found for wallet ${wallet.address}`);
+        return;
+      }
+
+      // Find the conversation for this toss
+      const activeTossConversation = await this.findConversationForToss(toss.id);
+      if (!activeTossConversation) {
+        console.log(`⚠️ No active conversation found for toss ${toss.id}`);
+        return;
+      }
+
+      // Verify the transaction details
+      const txDetails = await checkTransactionWithRetries(event.hash);
+      if (!txDetails || txDetails.status !== 'success') {
+        console.log(`⚠️ Transaction ${event.hash} verification failed or not successful`);
+        return;
+      }
+
+      // Extract transfer data and try to determine the selected option
+      const transferData = txDetails.data ? extractERC20TransferData(txDetails.data) : null;
+      if (!transferData) {
+        console.log(`⚠️ Could not extract transfer data from transaction ${event.hash}`);
+        return;
+      }
+
+      // Try to extract option from amount encoding (fallback method)
+      const selectedOption = await extractOptionFromTransferAmount(
+        transferData,
+        toss.id,
+        (id: string) => this.getToss(id)
+      );
+
+      if (!selectedOption) {
+        console.log(`⚠️ Could not determine selected option from transaction ${event.hash}`);
+        // Send a message asking user to specify their choice
+        await activeTossConversation.send(
+          `🔔 Detected payment of ${Number(event.value) / 1000000} USDC from ${event.from}!\n` +
+          `However, I couldn't determine which option you chose. Please reply with your selection:\n` +
+          `${toss.tossOptions?.map((opt, i) => `${i + 1}. ${opt}`).join('\n')}`
+        );
+        return;
+      }
+
+      // Create a mock message for processing
+      const mockMessage = {
+        senderInboxId: '', // We'll need to look this up
+        content: { reference: event.hash },
+        conversationId: activeTossConversation.id,
+        contentType: { typeId: 'transactionReference' }
+      } as DecodedMessage;
+
+      // Find the sender's inbox ID from the transaction
+      const senderInboxId = await this.findInboxIdForAddress(event.from);
+      if (senderInboxId) {
+        mockMessage.senderInboxId = senderInboxId;
+        // Process the join as if it were a transaction reference
+        await this.processTossJoin(
+          this.client,
+          activeTossConversation,
+          mockMessage,
+          toss.id,
+          selectedOption,
+          txDetails
+        );
+      } else {
+        // Send notification about unidentified sender
+        await activeTossConversation.send(
+          `🔔 Detected payment of ${Number(event.value) / 1000000} USDC for "${selectedOption}" from ${event.from}!\n` +
+          `The sender is not in this XMTP conversation, but the payment has been received.`
+        );
+      }
+
+    } catch (error) {
+      console.error("Error processing detected transaction:", error);
+    }
+  }
+
+  /**
+   * Find conversation for a specific toss (helper method)
+   */
+  private async findConversationForToss(tossId: string): Promise<any> {
+    if (!this.client) return null;
+
+    try {
+      // This is a simplified approach - in practice you'd need to maintain
+      // a mapping of tosses to conversations
+      const toss = await this.getToss(tossId);
+      if (toss?.conversationId) {
+        const conversation = await this.client.conversations.getConversationById(toss.conversationId);
+        return conversation || null;
+      }
+    } catch (error) {
+      console.error("Error finding conversation for toss:", error);
+    }
+    
+    return null;
+  }
+
+  /**
+   * Find inbox ID for an Ethereum address (helper method)
+   */
+  private async findInboxIdForAddress(address: string): Promise<string | null> {
+    if (!this.client) return null;
+
+    try {
+      // This would require a more sophisticated mapping in practice
+      // For now, we'll return null and handle the case in the caller
+      return null;
+    } catch (error) {
+      console.error("Error finding inbox ID for address:", error);
+      return null;
+    }
   }
 
   async getBalance(userId: string): Promise<{ address?: string; balance: number }> {
@@ -91,6 +240,10 @@ export class TossManager {
     }
 
     await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
+    
+    // Add wallet to transaction monitoring
+    await this.transactionMonitor.addWalletToMonitor(tossWallet.address, tossId);
+    console.log(`📍 Added wallet ${tossWallet.address} to transaction monitoring for toss ${tossId}`);
     
     return toss;
   }
@@ -246,6 +399,11 @@ export class TossManager {
       toss.paymentSuccess = true; // No transfers needed
       toss.tossResult = matchingOption;
       await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
+      
+      // Remove wallet from monitoring since toss is completed
+      this.transactionMonitor.removeWalletFromMonitor(toss.walletAddress);
+      console.log(`🗑️ Removed wallet ${toss.walletAddress} from monitoring (toss completed)`);
+      
       return toss;
     }
 
@@ -343,6 +501,11 @@ export class TossManager {
     }
     
     await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
+    
+    // Remove wallet from monitoring since toss is completed
+    this.transactionMonitor.removeWalletFromMonitor(toss.walletAddress);
+    console.log(`🗑️ Removed wallet ${toss.walletAddress} from monitoring (toss completed)`);
+    
     return toss;
   }
 
@@ -460,6 +623,11 @@ export class TossManager {
     }
     
     await this.storage.saveData(STORAGE_CATEGORIES.TOSS, tossId, toss);
+    
+    // Remove wallet from monitoring since toss is cancelled
+    this.transactionMonitor.removeWalletFromMonitor(toss.walletAddress);
+    console.log(`🗑️ Removed wallet ${toss.walletAddress} from monitoring (toss cancelled)`);
+    
     return toss;
   }
 
@@ -655,7 +823,30 @@ export class TossManager {
         const toss = await this.getActiveTossForConversation(conversationId);
         if (!toss) return "No active toss found in this group.";
         
-        return this.formatTossStatus(toss);
+        const statusText = this.formatTossStatus(toss);
+        const monitoringStatus = this.transactionMonitor.isActive() 
+          ? `\n📍 Transaction monitoring: Active (${this.transactionMonitor.getMonitoredWallets().length} wallets)`
+          : `\n⚠️ Transaction monitoring: Inactive`;
+        
+        return statusText + monitoringStatus;
+      }
+      
+      case "monitor": {
+        const isActive = this.transactionMonitor.isActive();
+        const monitoredWallets = this.transactionMonitor.getMonitoredWallets();
+        
+        let status = `🔍 Transaction Monitoring Status:\n`;
+        status += `Status: ${isActive ? "✅ Active" : "❌ Inactive"}\n`;
+        status += `Monitored Wallets: ${monitoredWallets.length}\n\n`;
+        
+        if (monitoredWallets.length > 0) {
+          status += `Monitored Addresses:\n`;
+          for (const wallet of monitoredWallets) {
+            status += `• ${wallet.address} (Toss: ${wallet.tossId})\n`;
+          }
+        }
+        
+        return status;
       }
       
       case "refresh": {
