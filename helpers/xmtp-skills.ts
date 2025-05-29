@@ -168,7 +168,7 @@ export function shouldProcessMessage(
 }
 
 export const preMessageHandler = async (
-  client: Client,
+  client: Client<any>,
   conversation: Conversation,
   message: DecodedMessage,
   isDm: boolean,
