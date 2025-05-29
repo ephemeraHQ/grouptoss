@@ -116,7 +116,7 @@ export const initializeClient = async (
    * Core message streaming function with robust error handling
    */
   const streamMessages = async (
-    client: Client,
+    client: Client<any>,
     callBack: MessageHandler,
     options: AgentOptions,
   ): Promise<void> => {
@@ -263,7 +263,7 @@ export const initializeClient = async (
     }
   };
 
-  const clients: Client[] = [];
+  const clients: Client<any>[] = [];
   const streamPromises: Promise<void>[] = [];
 
   for (const option of mergedOptions) {
