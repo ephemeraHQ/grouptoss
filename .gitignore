@@ -19,7 +19,10 @@ yarn-error.log*
 .idea/
 
 # packages
-.yarn/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
 .pnpm/
 .pnpm-workspace/
 .data/

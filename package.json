@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "tsx src/index.ts",
     "dev": "tsx --watch src/index.ts",
-    "gen:keys": "tsx scripts/generateKeys.ts"
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "gen:keys": "tsx scripts/generateKeys.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@coinbase/agentkit": "^0.6.2",
@@ -18,17 +23,29 @@
     "@langchain/openai": "latest",
     "@xmtp/content-type-transaction-reference": "^2.0.2",
     "@xmtp/content-type-wallet-send-calls": "^1.0.1",
-    "@xmtp/node-sdk": "2.1.0-rc5",
-    "dotenv": "^16.4.7",
-    "rimraf": "^6.0.1",
+    "@xmtp/node-sdk": "2.1.0",
     "uint8arrays": "^5.1.0",
     "viem": "^2.7.15"
   },
   "devDependencies": {
+    "@eslint/compat": "^1.2.6",
+    "@eslint/js": "^9.19.0",
+    "@ianvs/prettier-plugin-sort-imports": "^4.4.2",
+    "@types/eslint__js": "^8.42.3",
+    "@types/node": "^22.13.0",
+    "dotenv": "^16.4.7",
+    "eslint": "^9.19.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-prettier": "^5.2.3",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "prettier-plugin-packagejson": "^2.5.8",
+    "rimraf": "^6.0.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.22.0"
   },
-  "packageManager": "yarn@4.9.1",
+  "packageManager": "yarn@4.6.0",
   "engines": {
     "node": ">=20"
   }

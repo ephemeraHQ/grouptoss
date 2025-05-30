@@ -7,19 +7,19 @@ import {
   type LogLevel,
   type XmtpEnv,
 } from "@xmtp/node-sdk";
+import "dotenv/config";
 import {
   createSigner,
   generateEncryptionKeyHex,
   getDbPath,
   getEncryptionKeyFromHex,
   logAgentDetails,
-} from "./client";
-import "dotenv/config";
+} from "../helpers/client";
 import {
   getCommandConfig,
   preMessageHandler,
   processMessageCommands,
-} from "./xmtp-skills";
+} from "../helpers/xmtp-skills";
 
 /**
  * Configuration options for the XMTP agent
@@ -116,7 +116,7 @@ export const initializeClient = async (
    * Core message streaming function with robust error handling
    */
   const streamMessages = async (
-    client: Client<any>,
+    client: Client,
     callBack: MessageHandler,
     options: AgentOptions,
   ): Promise<void> => {
@@ -125,10 +125,9 @@ export const initializeClient = async (
     const acceptTypes = options.acceptTypes || ["text"];
     let backoffTime = RETRY_DELAY_MS;
 
-    // Main stream loop - never exits
-    while (true) {
+    // Start stream with limited retries
+    while (retryCount < MAX_RETRIES) {
       try {
-        // Reset backoff time if we've been running successfully
         if (retryCount === 0) {
           backoffTime = RETRY_DELAY_MS;
         }
@@ -166,7 +165,7 @@ export const initializeClient = async (
 
             const preMessageHandlerResult = await preMessageHandler(
               client,
-              conversation,
+              conversation as Conversation,
               message,
               isDm,
               options,
@@ -202,7 +201,7 @@ export const initializeClient = async (
 
                 await messageHandler(
                   client,
-                  conversation,
+                  conversation as Conversation,
                   message,
                   messageContext,
                 );
@@ -263,7 +262,7 @@ export const initializeClient = async (
     }
   };
 
-  const clients: Client<any>[] = [];
+  const clients: Client[] = [];
   const streamPromises: Promise<void>[] = [];
 
   for (const option of mergedOptions) {
@@ -283,10 +282,10 @@ export const initializeClient = async (
           codecs: option.codecs ?? [],
         });
 
-        clients.push(client);
+        clients.push(client as Client);
 
         // Start message streaming
-        const streamPromise = streamMessages(client, messageHandler, {
+        const streamPromise = streamMessages(client as Client, messageHandler, {
           ...option,
         });
 

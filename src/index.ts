@@ -1,22 +1,36 @@
-import { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
-import { initializeAgent } from "@helpers/walletService";
-import { AgentOptions, initializeClient, MessageContext } from "@helpers/xmtp-handler";
-import { AGENT_INSTRUCTIONS, DEFAULT_AMOUNT, DEFAULT_OPTIONS, MAX_USDC_AMOUNT } from "./constants";
-import {  ParsedToss, StreamChunk, TossJsonResponse } from "./types";
-import { TossManager } from "./toss-manager";     
-import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
-import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
-import { WalletService } from "../helpers/walletService";
-import {  storage } from "../helpers/localStorage";  
-import { createReactAgent } from "@langchain/langgraph/prebuilt";
-import { AgentConfig } from "./types";
 import { HumanMessage } from "@langchain/core/messages";
-
+import type { createReactAgent } from "@langchain/langgraph/prebuilt";
+import { TransactionReferenceCodec } from "@xmtp/content-type-transaction-reference";
+import { WalletSendCallsCodec } from "@xmtp/content-type-wallet-send-calls";
+import type { Client, Conversation, DecodedMessage } from "@xmtp/node-sdk";
+import { storage } from "../helpers/localStorage";
+import {
+  initializeAgent,
+  WalletService,
+  type WalletStorage,
+} from "../helpers/walletService";
+import {
+  initializeClient,
+  type AgentOptions,
+  type MessageContext,
+} from "../helpers/xmtp-handler";
+import {
+  AGENT_INSTRUCTIONS,
+  DEFAULT_AMOUNT,
+  DEFAULT_OPTIONS,
+  MAX_USDC_AMOUNT,
+} from "./constants";
+import { TossManager } from "./toss-manager";
+import type {
+  AgentConfig,
+  ParsedToss,
+  StreamChunk,
+  TossJsonResponse,
+} from "./types";
 
 // Initialize wallet service and toss manager with proper dependencies
-const walletService = new WalletService(storage, 100); // 100 is the max transfer amount
+const walletService = new WalletService(storage as WalletStorage, 100); // 100 is the max transfer amount
 const tossManager = new TossManager(walletService, storage);
-
 
 /**
  * Process a message with the agent
@@ -24,12 +38,12 @@ const tossManager = new TossManager(walletService, storage);
 export async function processAgentMessage(
   agent: ReturnType<typeof createReactAgent>,
   config: AgentConfig,
-  message: string
+  message: string,
 ): Promise<string> {
   try {
     const stream = await agent.stream(
       { messages: [new HumanMessage(message)] },
-      config
+      config,
     );
 
     let response = "";
@@ -60,7 +74,7 @@ export async function processAgentMessage(
 export async function parseNaturalLanguageToss(
   agent: ReturnType<typeof createReactAgent>,
   config: AgentConfig,
-  prompt: string
+  prompt: string,
 ): Promise<ParsedToss | string> {
   // Default values
   const defaultResult: ParsedToss = {
@@ -106,12 +120,12 @@ export async function parseNaturalLanguageToss(
   let parsedJson: TossJsonResponse | null = null;
   try {
     const json = response.match(/\{[\s\S]*\}/);
-    if (json) { 
+    if (json) {
       parsedJson = JSON.parse(json[0]) as TossJsonResponse;
     }
   } catch (error) {
     console.error("Error parsing JSON from agent response:", error);
-      return "Invalid toss request: No JSON found in response";
+    return "Invalid toss request: No JSON found in response";
   }
 
   if (!parsedJson) {
@@ -124,11 +138,13 @@ export async function parseNaturalLanguageToss(
 
   // Get the amount from extracted amount, parsed JSON, or default
   let amount = extractedAmount || parsedJson.amount || DEFAULT_AMOUNT;
-  
+
   // Enforce maximum amount
   const numericAmount = parseFloat(amount);
   if (numericAmount > MAX_USDC_AMOUNT) {
-    console.log(`Amount ${numericAmount} exceeds maximum ${MAX_USDC_AMOUNT} USDC, capping at maximum`);
+    console.log(
+      `Amount ${numericAmount} exceeds maximum ${MAX_USDC_AMOUNT} USDC, capping at maximum`,
+    );
     amount = MAX_USDC_AMOUNT.toString();
   }
 
@@ -141,8 +157,7 @@ export async function parseNaturalLanguageToss(
         : DEFAULT_OPTIONS,
     amount: amount,
   };
-} 
-
+}
 
 /**
  * Message handler function
@@ -151,64 +166,80 @@ async function processMessage(
   client: Client,
   conversation: Conversation,
   message: DecodedMessage,
-  messageContext: MessageContext
+  messageContext: MessageContext,
 ): Promise<void> {
   try {
     // Set the client for direct transfers
     tossManager.setClient(client);
-    
+
     const inboxId = message.senderInboxId;
-    
+
     // Handle transaction references
     if (messageContext.isTransaction) {
       await conversation.send("⏳ Fetching transaction details...");
-      await tossManager.handleTransactionReference(client, conversation, message);
+      await tossManager.handleTransactionReference(
+        client,
+        conversation,
+        message,
+      );
       return;
     }
-    
+
     // Handle text commands
     if (messageContext.hasCommand && messageContext.command) {
       // Initialize agent
       const { agent, config } = await initializeAgent(
         inboxId,
-        AGENT_INSTRUCTIONS
+        AGENT_INSTRUCTIONS,
       );
 
       // Process command
       const response = await tossManager.handleCommand(
-        client, 
-        conversation, 
-        message, 
-        messageContext, 
-        agent, 
+        client,
+        conversation,
+        message,
+        messageContext,
+        agent,
         config,
       );
-      
-      response.length > 0 && await conversation.send(response);
-      
+
+      if (response.length > 0) {
+        await conversation.send(response);
+      }
+
       return;
     }
-    
+
     // No command or transaction found - nothing to process
-    console.debug(`No command or transaction found in message: ${message.content}`);
-    
+    console.debug(
+      `No command or transaction found in message: ${String(message.content)}`,
+    );
   } catch (error) {
     console.error("Error:", error);
   }
 }
 
-
 // Initialize client
-const options: AgentOptions = { 
+const options: AgentOptions = {
   walletKey: process.env.WALLET_KEY as string,
   acceptGroups: true,
   acceptTypes: ["text", "transactionReference"],
   networks: process.env.XMTP_NETWORKS?.split(",") ?? ["dev"],
-  welcomeMessage: "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
-  groupWelcomeMessage: "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
+  welcomeMessage:
+    "Welcome to the Group Toss Game! \nAdd this bot to a group and @toss help to get started",
+  groupWelcomeMessage:
+    "Hi! I'm cointoss, a bot that allows you to toss with your friends. Send @toss help to get started",
   codecs: [new WalletSendCallsCodec(), new TransactionReferenceCodec()],
   commandPrefix: "@toss",
-  allowedCommands: ["help", "join", "close", "balance", "status", "refresh", "create", "monitor"], // All commands this bot should handle
-}
+  allowedCommands: [
+    "help",
+    "join",
+    "close",
+    "balance",
+    "status",
+    "refresh",
+    "create",
+    "monitor",
+  ], // All commands this bot should handle
+};
 await initializeClient(processMessage, [options]);
-

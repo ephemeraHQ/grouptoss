@@ -105,7 +105,7 @@ The helper.ts file should contain utility functions for working with XMTP:
 
 ```typescript
 import { getRandomValues } from "node:crypto";
-import { type Signer, IdentifierKind } from "@xmtp/node-sdk";
+import { IdentifierKind, type Signer } from "@xmtp/node-sdk";
 import { fromString, toString } from "uint8arrays";
 import { createWalletClient, http, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -217,11 +217,11 @@ async function main() {
     console.log(
       `Received message: ${message.content as string} by ${
         message.senderInboxId
-      }`
+      }`,
     );
 
     const conversation = await client.conversations.getConversationById(
-      message.conversationId
+      message.conversationId,
     );
 
     if (!conversation) {

@@ -1,16 +1,20 @@
-import { validateEnvironment } from "./client";
+import {
+  ContentTypeTransactionReference,
+  type TransactionReference,
+} from "@xmtp/content-type-transaction-reference";
 import type { WalletSendCallsParams } from "@xmtp/content-type-wallet-send-calls";
+import type { Conversation } from "@xmtp/node-sdk";
 import { createPublicClient, formatUnits, http } from "viem";
 import { base, baseSepolia } from "viem/chains";
-import { ContentTypeTransactionReference, TransactionReference } from "@xmtp/content-type-transaction-reference";
-import { Conversation } from "@xmtp/node-sdk";
-import { TransactionDetails, ERC20TransferData } from "../src/types";
-import { MAX_USDC_AMOUNT, networks } from "src/constants";
-
+import { MAX_USDC_AMOUNT, networks } from "../src/constants";
+import type { ERC20TransferData, TransactionDetails } from "../src/types";
+import { validateEnvironment } from "./client";
 
 // Get the network configuration based on environment
 const { NETWORK_ID } = validateEnvironment(["NETWORK_ID"]);
-const networkConfigResult = networks.find(network => network.networkId === NETWORK_ID);
+const networkConfigResult = networks.find(
+  (network) => network.networkId === NETWORK_ID,
+);
 if (!networkConfigResult) {
   throw new Error(`Network ID ${NETWORK_ID} not found`);
 }
@@ -55,11 +59,13 @@ export async function getUSDCBalance(address: string): Promise<string> {
 /**
  * Verify transaction on the blockchain
  */
-export async function verifyTransaction(txHash: string): Promise<TransactionDetails | null> {
+export async function verifyTransaction(
+  txHash: string,
+): Promise<TransactionDetails | null> {
   try {
     // Clean the transaction hash
-    const cleanHash = txHash.startsWith('0x') ? txHash : `0x${txHash}`;
-    
+    const cleanHash = txHash.startsWith("0x") ? txHash : `0x${txHash}`;
+
     // Get transaction receipt
     const receipt = await publicClient.getTransactionReceipt({
       hash: cleanHash as `0x${string}`,
@@ -71,22 +77,18 @@ export async function verifyTransaction(txHash: string): Promise<TransactionDeta
     });
 
     // Check if transaction was successful
-    const status = receipt.status === 'success' 
-      ? 'success' 
-      : receipt.status === 'reverted' 
-        ? 'failed' 
-        : 'pending';
-    
+    const status = receipt.status === "success" ? "success" : "failed";
+
     return {
       status,
       to: transaction.to,
       from: transaction.from,
       data: transaction.input,
       value: transaction.value,
-      logs: receipt.logs
+      logs: receipt.logs,
     };
   } catch (error) {
-    console.error('Error verifying transaction:', error);
+    console.error("Error verifying transaction:", error);
     return null;
   }
 }
@@ -94,10 +96,12 @@ export async function verifyTransaction(txHash: string): Promise<TransactionDeta
 /**
  * Extract token transfer information from transaction data
  */
-export function extractERC20TransferData(txData: string): ERC20TransferData | null {
+export function extractERC20TransferData(
+  txData: string,
+): ERC20TransferData | null {
   try {
     // Check if this is a standard ERC20 transfer method (0xa9059cbb)
-    if (!txData || !txData.startsWith('0xa9059cbb')) {
+    if (!txData || !txData.startsWith("0xa9059cbb")) {
       return null;
     }
 
@@ -109,13 +113,13 @@ export function extractERC20TransferData(txData: string): ERC20TransferData | nu
     const amountHex = `0x${txData.slice(74, 138)}`;
     const amount = BigInt(amountHex);
 
-    return { 
-      recipient, 
+    return {
+      recipient,
       amount,
-      metadata: {} 
+      metadata: {},
     };
   } catch (error) {
-    console.error('Error extracting ERC20 transfer data:', error);
+    console.error("Error extracting ERC20 transfer data:", error);
     return null;
   }
 }
@@ -127,17 +131,19 @@ export function createUSDCTransferCalls(
   fromAddress: string,
   recipientAddress: string,
   amount: number,
-  additionalMetadata?: Record<string, any>,
+  additionalMetadata?: Record<string, unknown>,
   description?: string,
 ): WalletSendCallsParams {
   const methodSignature = "0xa9059cbb"; // Function signature for ERC20 'transfer(address,uint256)'
-  
+
   // Check if amount exceeds maximum limit
   const amountInUsdc = amount / Math.pow(10, networkConfig.decimals);
   if (amountInUsdc > MAX_USDC_AMOUNT) {
-    throw new Error(`Transaction amount (${amountInUsdc} USDC) exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`);
+    throw new Error(
+      `Transaction amount (${amountInUsdc} USDC) exceeds maximum limit of ${MAX_USDC_AMOUNT} USDC`,
+    );
   }
-  
+
   // Use the exact amount provided without any modifications
   const amountToSend = amount;
 
@@ -145,18 +151,20 @@ export function createUSDCTransferCalls(
   const transactionData = `${methodSignature}${recipientAddress
     .slice(2)
     .padStart(64, "0")}${BigInt(amountToSend).toString(16).padStart(64, "0")}`;
-  
+
   // Create metadata with additional fields
   const callMetadata = {
-    description: description ?? `Transfer ${amountToSend / Math.pow(10, networkConfig.decimals)} USDC on ${networkConfig.networkName}`,
+    description:
+      description ??
+      `Transfer ${amountToSend / Math.pow(10, networkConfig.decimals)} USDC on ${networkConfig.networkName}`,
     transactionType: "transfer",
     currency: "USDC",
     amount: amountToSend,
     decimals: networkConfig.decimals,
     networkId: networkConfig.networkId,
-    ...additionalMetadata
+    ...additionalMetadata,
   };
-  
+
   return {
     version: "1.0",
     from: fromAddress as `0x${string}`,
@@ -167,7 +175,7 @@ export function createUSDCTransferCalls(
         data: transactionData as `0x${string}`,
         metadata: callMetadata,
       },
-    ]
+    ],
   };
 }
 
@@ -185,47 +193,60 @@ export async function checkTransactionWithRetries(
   txHash: string,
   maxRetries = 5,
   initialDelay = 5000,
-  backoffFactor = 1.5
+  backoffFactor = 1.5,
 ): Promise<TransactionDetails | null> {
   let currentDelay = initialDelay;
-  
+
   // Wait before the first check
-  console.debug(`Waiting ${Math.round(currentDelay / 1000)}s before checking transaction ${txHash}...`);
+  console.debug(
+    `Waiting ${Math.round(currentDelay / 1000)}s before checking transaction ${txHash}...`,
+  );
   await sleep(currentDelay);
-  
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      console.debug(`Checking transaction ${txHash}, attempt ${attempt + 1}/${maxRetries + 1}`);
-      
+      console.debug(
+        `Checking transaction ${txHash}, attempt ${attempt + 1}/${maxRetries + 1}`,
+      );
+
       // Try to verify the transaction
       const txDetails = await verifyTransaction(txHash);
-      
+
       if (txDetails) {
-        console.debug(`Transaction ${txHash} found with status: ${txDetails.status}`);
+        console.debug(
+          `Transaction ${txHash} found with status: ${txDetails.status}`,
+        );
         return txDetails;
       }
-      
+
       if (attempt === maxRetries) {
-        console.debug(`Transaction ${txHash} not found after ${maxRetries + 1} attempts`);
+        console.debug(
+          `Transaction ${txHash} not found after ${maxRetries + 1} attempts`,
+        );
         return null;
       }
-      
-      console.debug(`Transaction ${txHash} not found, retrying in ${Math.round(currentDelay / 1000)}s...`);
+
+      console.debug(
+        `Transaction ${txHash} not found, retrying in ${Math.round(currentDelay / 1000)}s...`,
+      );
       await sleep(currentDelay);
-      
+
       // Increase delay for next attempt
       currentDelay = currentDelay * backoffFactor;
     } catch (error) {
       if (attempt === maxRetries) {
         throw error;
       }
-      
-      console.error(`Error checking transaction (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
+
+      console.error(
+        `Error checking transaction (attempt ${attempt + 1}/${maxRetries + 1}):`,
+        error,
+      );
       await sleep(currentDelay);
       currentDelay = currentDelay * backoffFactor;
     }
   }
-  
+
   return null;
 }
 
@@ -235,14 +256,17 @@ export async function checkTransactionWithRetries(
 export async function sendTransactionReference(
   conversation: Conversation,
   transactionHash: string,
-) { 
+) {
   try {
     const transactionReference: TransactionReference = {
       networkId: networkConfig.chainId,
       reference: transactionHash,
     };
     console.debug(`Sending transaction reference: ${transactionHash}`);
-    await conversation.send(transactionReference, ContentTypeTransactionReference);
+    await conversation.send(
+      transactionReference,
+      ContentTypeTransactionReference,
+    );
     return true;
   } catch (error) {
     console.error("Error sending transaction reference:", error);

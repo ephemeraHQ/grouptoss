@@ -1,13 +1,14 @@
-import { createPublicClient, http, parseAbi, getContract, formatUnits } from "viem";
+import { createPublicClient, formatUnits, http, parseAbi } from "viem";
 import { base, baseSepolia } from "viem/chains";
-import { validateEnvironment } from "./client";
 import { networks } from "../src/constants";
-import { FileStorage } from "./localStorage";
-import { extractERC20TransferData, verifyTransaction } from "./transactions";
+import { validateEnvironment } from "./client";
+import type { FileStorage } from "./localStorage";
 
 // Get network configuration
 const { NETWORK_ID } = validateEnvironment(["NETWORK_ID"]);
-const networkConfigResult = networks.find(network => network.networkId === NETWORK_ID);
+const networkConfigResult = networks.find(
+  (network) => network.networkId === NETWORK_ID,
+);
 if (!networkConfigResult) {
   throw new Error(`Network ID ${NETWORK_ID} not found`);
 }
@@ -22,8 +23,8 @@ const publicClient = createPublicClient({
 
 // ERC20 Transfer event ABI
 const erc20Abi = parseAbi([
-  'event Transfer(address indexed from, address indexed to, uint256 value)',
-  'function balanceOf(address owner) view returns (uint256)',
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+  "function balanceOf(address owner) view returns (uint256)",
 ]);
 
 export interface TransactionEvent {
@@ -46,7 +47,10 @@ export class TransactionMonitor {
   private monitoredWallets: Map<string, MonitoredWallet> = new Map();
   private isMonitoring = false;
   private monitoringInterval?: NodeJS.Timeout;
-  private onTransactionCallback?: (event: TransactionEvent, wallet: MonitoredWallet) => Promise<void>;
+  private onTransactionCallback?: (
+    event: TransactionEvent,
+    wallet: MonitoredWallet,
+  ) => Promise<void>;
 
   constructor(storage: FileStorage) {
     this.storage = storage;
@@ -57,11 +61,13 @@ export class TransactionMonitor {
    */
   async addWalletToMonitor(address: string, tossId: string): Promise<void> {
     const lowerAddress = address.toLowerCase();
-    console.log(`📍 Adding wallet ${lowerAddress} (toss: ${tossId}) to monitoring`);
-    
+    console.log(
+      `📍 Adding wallet ${lowerAddress} (toss: ${tossId}) to monitoring`,
+    );
+
     // Get current block number as starting point
     const currentBlock = await publicClient.getBlockNumber();
-    
+
     this.monitoredWallets.set(lowerAddress, {
       address: lowerAddress,
       tossId,
@@ -83,7 +89,12 @@ export class TransactionMonitor {
   /**
    * Set callback function for when transactions are detected
    */
-  onTransaction(callback: (event: TransactionEvent, wallet: MonitoredWallet) => Promise<void>): void {
+  onTransaction(
+    callback: (
+      event: TransactionEvent,
+      wallet: MonitoredWallet,
+    ) => Promise<void>,
+  ): void {
     this.onTransactionCallback = callback;
   }
 
@@ -97,18 +108,22 @@ export class TransactionMonitor {
     }
 
     this.isMonitoring = true;
-    console.log(`🔍 Starting transaction monitoring (checking every ${intervalMs/1000}s)`);
+    console.log(
+      `🔍 Starting transaction monitoring (checking every ${intervalMs / 1000}s)`,
+    );
 
     // Initial check
     await this.checkForNewTransactions();
 
     // Set up periodic monitoring
-    this.monitoringInterval = setInterval(async () => {
-      try {
-        await this.checkForNewTransactions();
-      } catch (error) {
-        console.error("Error during transaction monitoring:", error);
-      }
+    this.monitoringInterval = setInterval(() => {
+      void (async () => {
+        try {
+          await this.checkForNewTransactions();
+        } catch (error) {
+          console.error("Error during transaction monitoring:", error);
+        }
+      })();
     }, intervalMs);
 
     console.log("✅ Transaction monitoring started");
@@ -134,12 +149,14 @@ export class TransactionMonitor {
       return;
     }
 
-    console.debug(`🔍 Checking transactions for ${this.monitoredWallets.size} monitored wallets...`);
+    console.debug(
+      `🔍 Checking transactions for ${this.monitoredWallets.size} monitored wallets...`,
+    );
 
     try {
       const currentBlock = await publicClient.getBlockNumber();
-      
-      for (const [address, wallet] of this.monitoredWallets) {
+
+      for (const [, wallet] of this.monitoredWallets) {
         await this.checkWalletTransactions(wallet, currentBlock);
       }
     } catch (error) {
@@ -150,11 +167,16 @@ export class TransactionMonitor {
   /**
    * Check transactions for a specific wallet
    */
-  private async checkWalletTransactions(wallet: MonitoredWallet, currentBlock: bigint): Promise<void> {
+  private async checkWalletTransactions(
+    wallet: MonitoredWallet,
+    currentBlock: bigint,
+  ): Promise<void> {
     try {
       const fromBlock = wallet.lastCheckedBlock || currentBlock - 100n; // Check last 100 blocks if no last checked block
-      
-      console.debug(`Checking wallet ${wallet.address} from block ${fromBlock} to ${currentBlock}`);
+
+      console.debug(
+        `Checking wallet ${wallet.address} from block ${fromBlock} to ${currentBlock}`,
+      );
 
       // Get USDC transfer events to this wallet
       const logs = await publicClient.getLogs({
@@ -167,39 +189,43 @@ export class TransactionMonitor {
         toBlock: currentBlock,
       });
 
-      console.debug(`Found ${logs.length} potential transactions for wallet ${wallet.address}`);
+      console.debug(
+        `Found ${logs.length} potential transactions for wallet ${wallet.address}`,
+      );
 
       for (const log of logs) {
-        if (log.args && log.transactionHash) {
-          const event: TransactionEvent = {
-            hash: log.transactionHash,
-            from: log.args.from as string,
-            to: log.args.to as string,
-            value: log.args.value as bigint,
-            blockNumber: log.blockNumber || 0n,
-          };
+        const event: TransactionEvent = {
+          hash: log.transactionHash,
+          from: log.args.from as string,
+          to: log.args.to as string,
+          value: log.args.value as bigint,
+          blockNumber: log.blockNumber || 0n,
+        };
 
-          console.log(`🔔 New transaction detected: ${event.hash}`);
-          console.log(`  From: ${event.from}`);
-          console.log(`  To: ${event.to}`);
-          console.log(`  Amount: ${formatUnits(event.value, networkConfig.decimals)} USDC`);
+        console.log(`🔔 New transaction detected: ${event.hash}`);
+        console.log(`  From: ${event.from}`);
+        console.log(`  To: ${event.to}`);
+        console.log(
+          `  Amount: ${formatUnits(event.value, networkConfig.decimals)} USDC`,
+        );
 
-          // Call the callback if set
-          if (this.onTransactionCallback) {
-            try {
-              await this.onTransactionCallback(event, wallet);
-            } catch (callbackError) {
-              console.error("Error in transaction callback:", callbackError);
-            }
+        // Call the callback if set
+        if (this.onTransactionCallback) {
+          try {
+            await this.onTransactionCallback(event, wallet);
+          } catch (callbackError) {
+            console.error("Error in transaction callback:", callbackError);
           }
         }
       }
 
       // Update last checked block for this wallet
       wallet.lastCheckedBlock = currentBlock;
-
     } catch (error) {
-      console.error(`Error checking transactions for wallet ${wallet.address}:`, error);
+      console.error(
+        `Error checking transactions for wallet ${wallet.address}:`,
+        error,
+      );
     }
   }
 
@@ -211,7 +237,7 @@ export class TransactionMonitor {
       const balance = await publicClient.readContract({
         address: networkConfig.tokenAddress as `0x${string}`,
         abi: erc20Abi,
-        functionName: 'balanceOf',
+        functionName: "balanceOf",
         args: [address as `0x${string}`],
       });
       return formatUnits(balance, networkConfig.decimals);
@@ -240,14 +266,16 @@ export class TransactionMonitor {
    */
   async performBalanceAudit(): Promise<void> {
     console.log("🔍 Performing balance audit for monitored wallets...");
-    
+
     for (const [address, wallet] of this.monitoredWallets) {
       try {
         const balance = await this.getWalletBalance(address);
-        console.log(`💰 Wallet ${address} (toss: ${wallet.tossId}): ${balance} USDC`);
+        console.log(
+          `💰 Wallet ${address} (toss: ${wallet.tossId}): ${balance} USDC`,
+        );
       } catch (error) {
         console.error(`Error checking balance for ${address}:`, error);
       }
     }
   }
-} 
+}

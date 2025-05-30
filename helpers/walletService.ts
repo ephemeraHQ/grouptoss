@@ -15,11 +15,11 @@ import {
   type Trade,
   type WalletData,
 } from "@coinbase/coinbase-sdk";
-import { validateEnvironment } from "./client";
 import { MemorySaver } from "@langchain/langgraph";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import { isAddress } from "viem";
+import { validateEnvironment } from "./client";
 
 // Initialize the SDK when the module is loaded
 let sdkInitialized = false;
@@ -36,8 +36,8 @@ export type WalletInfo = {
 // Storage interface for persisting wallet data
 export interface WalletStorage {
   saveWallet(userId: string, walletData: string): Promise<void>;
-  getWallet(userId: string): Promise<any | null>;
-  getWalletByAddress(address: string): Promise<any | null>;
+  getWallet(userId: string): Promise<WalletInfo | null>;
+  getWalletByAddress(address: string): Promise<WalletInfo | null>;
 }
 
 const { CDP_API_KEY_NAME, CDP_API_KEY_PRIVATE_KEY, NETWORK_ID } =
@@ -125,7 +125,10 @@ function initializeCoinbaseSDK(): boolean {
       apiKeyName: CDP_API_KEY_NAME,
       privateKey: CDP_API_KEY_PRIVATE_KEY,
     });
-    console.debug("Coinbase SDK initialized successfully, network:", NETWORK_ID);
+    console.debug(
+      "Coinbase SDK initialized successfully, network:",
+      NETWORK_ID,
+    );
     return true;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -141,7 +144,7 @@ export class WalletService {
   constructor(storage: WalletStorage, maxTransferAmount = 100) {
     this.storage = storage;
     this.maxTransferAmount = maxTransferAmount;
-    
+
     if (!sdkInitialized) {
       sdkInitialized = initializeCoinbaseSDK();
     }
@@ -191,7 +194,7 @@ export class WalletService {
           walletData: walletInfo.walletData,
           address: walletInfo.address,
           userId: walletInfo.userId,
-        })
+        }),
       );
       console.debug("Wallet created and saved successfully");
       return walletInfo;
@@ -210,8 +213,8 @@ export class WalletService {
   async getWallet(userId: string): Promise<WalletInfo | undefined> {
     const walletData = await this.storage.getWallet(userId);
     if (walletData === null) {
-        console.debug(`No wallet found ${userId}, creating new one`);
-        return this.createWallet(userId);
+      console.debug(`No wallet found ${userId}, creating new one`);
+      return this.createWallet(userId);
     }
 
     const importedWallet = await Wallet.import(walletData.walletData);
@@ -242,7 +245,8 @@ export class WalletService {
         };
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       console.debug(`Error looking up wallet by address: ${errorMessage}`);
     }
 
@@ -252,13 +256,13 @@ export class WalletService {
   async transfer(
     fromUserId: string,
     toAddress: string,
-    amount: number
+    amount: number,
   ): Promise<CoinbaseTransfer | undefined> {
     if (!toAddress) {
       console.error(`❌ Invalid destination address: null or undefined`);
       return undefined;
     }
-    
+
     toAddress = toAddress.toLowerCase();
 
     console.debug("📤 TRANSFER INITIATED");
@@ -268,7 +272,9 @@ export class WalletService {
 
     // Validate amount is not above the maximum limit
     if (amount > this.maxTransferAmount) {
-      console.error(`❌ Amount ${amount} exceeds maximum limit of ${this.maxTransferAmount} USDC`);
+      console.error(
+        `❌ Amount ${amount} exceeds maximum limit of ${this.maxTransferAmount} USDC`,
+      );
       return undefined;
     }
 
@@ -294,8 +300,8 @@ export class WalletService {
     if (Number(balance) < amount) {
       console.error(
         `❌ Insufficient balance. Required: ${amount} USDC, Available: ${Number(
-          balance
-        )} USDC`
+          balance,
+        )} USDC`,
       );
       return undefined;
     }
@@ -314,15 +320,19 @@ export class WalletService {
     const existingWallet = await this.getWalletByAddress(toAddress);
     if (existingWallet) {
       // Use the address from our system
-      console.debug(`✅ Using existing wallet with address: ${existingWallet.address}`);
+      console.debug(
+        `✅ Using existing wallet with address: ${existingWallet.address}`,
+      );
       destinationAddress = existingWallet.address;
     } else {
-      console.debug(`ℹ️ Using raw address as destination: ${destinationAddress}`);
+      console.debug(
+        `ℹ️ Using raw address as destination: ${destinationAddress}`,
+      );
     }
 
     try {
       console.debug(
-        `🚀 Executing transfer of ${amount} USDC from ${from.address} to ${destinationAddress}...`
+        `🚀 Executing transfer of ${amount} USDC from ${from.address} to ${destinationAddress}...`,
       );
       const transfer = await from.wallet?.createTransfer({
         amount,
@@ -330,20 +340,25 @@ export class WalletService {
         destination: destinationAddress,
         gasless: true,
       });
-      
+
       if (!transfer) {
         console.error(`❌ Failed to create transfer`);
         return undefined;
       }
       try {
         await transfer.wait();
-        console.debug("Transfer has been confirmed:","URL:",await transfer.getTransactionLink(),"Hash:",await transfer.getTransactionHash());
+        console.debug(
+          "Transfer has been confirmed:",
+          "URL:",
+          transfer.getTransactionLink(),
+          "Hash:",
+          transfer.getTransactionHash(),
+        );
       } catch (error: unknown) {
         console.error("Error while waiting for transfer to complete:", error);
       }
       // Return the transfer object immediately
       return transfer;
-      
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -353,14 +368,14 @@ export class WalletService {
   }
 
   async checkBalance(
-    userId: string
+    userId: string,
   ): Promise<{ address: string | undefined; balance: number }> {
     // Check if this is an address
     if (isAddress(userId)) {
       const walletByAddress = await this.getWalletByAddress(userId);
       if (walletByAddress) {
         const balance = await walletByAddress.wallet?.getBalance(
-          Coinbase.assets.Usdc
+          Coinbase.assets.Usdc,
         );
         return {
           address: walletByAddress.address,
@@ -387,7 +402,7 @@ export class WalletService {
     userId: string,
     fromAssetId: string,
     toAssetId: string,
-    amount: number
+    amount: number,
   ): Promise<Trade | undefined> {
     // Check if this is an address
     if (isAddress(userId)) {
