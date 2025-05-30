@@ -88,12 +88,14 @@ export class TossManager {
         return;
       }
 
-      // Extract transfer data and try to determine the selected option
-      const transferData = txDetails.data ? extractERC20TransferData(txDetails.data) : null;
-      if (!transferData) {
-        console.log(`⚠️ Could not extract transfer data from transaction ${event.hash}`);
-        return;
-      }
+      // Use transfer data from the event (already extracted from logs)
+      const transferData = {
+        recipient: event.to,
+        amount: event.value,
+        metadata: {}
+      };
+
+      console.log(`✅ Transfer data from event: recipient=${transferData.recipient}, amount=${transferData.amount.toString()}`);
 
       // Try to extract option from amount encoding (fallback method)
       const selectedOption = await extractOptionFromTransferAmount(
@@ -762,6 +764,11 @@ export class TossManager {
         );
       }
       
+      // Toss creation (natural language prompts) should only work in groups
+      if (messageContext.isDm) {
+        return "Tosses can only be created in group chats. Please add me to a group and try again.";
+      }
+      
       // Check for existing active toss
       const existingToss = await this.getActiveTossForConversation(conversationId);
       if (existingToss) {
@@ -811,14 +818,8 @@ export class TossManager {
     const conversationId = conversation.id;
     
     switch (command) {
-      case "balance": {
-        if (!isDm) return "For checking your balance, please DM me.";
-        const { balance, address } = await this.getBalance(inboxId);
-        return `Your balance is ${balance} USDC. Your address is ${address}`;
-      }
-      
       case "status": {
-        if (!conversationId) return "Tosses are only supported in group chats.";
+        if (isDm) return "Toss status can only be checked in group chats where the toss was created.";
         
         const toss = await this.getActiveTossForConversation(conversationId);
         if (!toss) return "No active toss found in this group.";
@@ -832,6 +833,8 @@ export class TossManager {
       }
       
       case "monitor": {
+        if (!isDm) return "For monitoring information, please DM me.";
+        
         const isActive = this.transactionMonitor.isActive();
         const monitoredWallets = this.transactionMonitor.getMonitoredWallets();
         
@@ -850,7 +853,7 @@ export class TossManager {
       }
       
       case "refresh": {
-        if (!conversationId) return "Tosses are only supported in group chats.";
+        if (isDm) return "Toss refresh can only be used in group chats where the toss was created.";
         
         const toss = await this.getActiveTossForConversation(conversationId);
         if (!toss) return "No active toss found in this group.";
@@ -861,7 +864,7 @@ export class TossManager {
       }
       
       case "join": {
-        if (!conversationId) return "Tosses are only supported in group chats.";
+        if (isDm) return "You can only join tosses in group chats where the toss was created.";
         
         const toss = await this.getActiveTossForConversation(conversationId);
         if (!toss) return "No active toss found in this group. Start one with '@toss <topic>'";
@@ -876,7 +879,7 @@ export class TossManager {
       }
 
       case "close": {
-        if (!conversationId) return "Tosses are only supported in group chats.";
+        if (isDm) return "You can only close tosses in group chats where the toss was created.";
         
         const toss = await this.getActiveTossForConversation(conversationId);
         if (!toss) return "No active toss found in this group.";
