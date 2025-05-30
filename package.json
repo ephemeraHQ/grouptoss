@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "tsx src/index.ts",
     "dev": "tsx --watch src/index.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "gen:keys": "tsx scripts/generateKeys.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "start": "tsx src/index.ts"
   },
   "dependencies": {
     "@coinbase/agentkit": "^0.6.2",

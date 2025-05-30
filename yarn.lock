@@ -537,7 +537,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@ianvs/prettier-plugin-sort-imports@npm:^4.4.1":
+"@ianvs/prettier-plugin-sort-imports@npm:^4.4.2":
   version: 4.4.2
   resolution: "@ianvs/prettier-plugin-sort-imports@npm:4.4.2"
   dependencies:
@@ -2988,7 +2988,7 @@ __metadata:
     "@coinbase/coinbase-sdk": "npm:^0.22.0"
     "@eslint/compat": "npm:^1.2.6"
     "@eslint/js": "npm:^9.19.0"
-    "@ianvs/prettier-plugin-sort-imports": "npm:^4.4.1"
+    "@ianvs/prettier-plugin-sort-imports": "npm:^4.4.2"
     "@langchain/core": "npm:^0.3.20"
     "@langchain/langgraph": "npm:^0.2.24"
     "@langchain/openai": "npm:latest"

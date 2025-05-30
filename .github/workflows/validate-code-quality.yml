@@ -7,10 +7,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version-file: ".node-version"
-      - name: Enable Corepack
-        run: corepack enable
+          cache: "yarn"
+        env:
+          SKIP_YARN_COREPACK_CHECK: "1"
+      - run: corepack enable
       - run: yarn
-      - run: yarn build
+      - run: yarn format
+      - run: yarn typecheck
+      - run: yarn lint
+      - run: yarn build:examples

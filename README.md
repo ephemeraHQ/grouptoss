@@ -1,7 +1,9 @@
 # grouptoss.base.eth
 
 A simple agent that creates group tosses based on user messages.
+
 #
+
 ## Features
 
 - Create group tosses with custom topics and options
