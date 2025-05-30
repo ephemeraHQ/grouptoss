@@ -2,12 +2,12 @@ import { existsSync, mkdirSync } from "fs";
 import * as fs from "fs/promises";
 import path from "path";
 import { validateEnvironment } from "./client";
-import { WalletStorage } from "./walletService";
+import type { WalletInfo, WalletStorage } from "./walletService";
 
 const { NETWORK_ID } = validateEnvironment(["NETWORK_ID"]);
 export const STORAGE_DIRS = {
   WALLET: ".data/wallet_data",
-  XMTP: ".data/xmtp"
+  XMTP: ".data/xmtp",
 };
 
 /**
@@ -25,8 +25,8 @@ export class FileStorage implements WalletStorage {
    */
   public initialize(): void {
     if (this.initialized) return;
-    
-    Object.values(this.baseDirs).forEach(dir => {
+
+    Object.values(this.baseDirs).forEach((dir) => {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     });
 
@@ -36,7 +36,11 @@ export class FileStorage implements WalletStorage {
   /**
    * File operations - save/read/delete
    */
-  private async saveToFile(directory: string, identifier: string, data: string): Promise<boolean> {
+  private async saveToFile(
+    directory: string,
+    identifier: string,
+    data: string,
+  ): Promise<boolean> {
     const key = `${identifier}-${NETWORK_ID}`;
     try {
       await fs.writeFile(path.join(directory, `${key}.json`), data);
@@ -47,14 +51,23 @@ export class FileStorage implements WalletStorage {
     }
   }
 
-  private async readFromFile<T>(directory: string, identifier: string): Promise<T | null> {
+  private async readFromFile<T>(
+    directory: string,
+    identifier: string,
+  ): Promise<T | null> {
     try {
       const key = `${identifier}-${NETWORK_ID}`;
-      const data = await fs.readFile(path.join(directory, `${key}.json`), "utf-8");
+      const data = await fs.readFile(
+        path.join(directory, `${key}.json`),
+        "utf-8",
+      );
       return JSON.parse(data) as T;
     } catch (error) {
-      if (error instanceof Error && 
-          (error.message.includes("ENOENT") || error.message.includes("no such file or directory"))) {
+      if (
+        error instanceof Error &&
+        (error.message.includes("ENOENT") ||
+          error.message.includes("no such file or directory"))
+      ) {
         return null;
       }
       throw error;
@@ -74,39 +87,43 @@ export class FileStorage implements WalletStorage {
   /**
    * Generic data operations
    */
-  public async saveData(category: string, id: string, data: any): Promise<boolean> {
+  public async saveData(
+    category: string,
+    id: string,
+    data: unknown,
+  ): Promise<boolean> {
     if (!this.initialized) this.initialize();
-    
+
     // Make sure the directory exists
     const directory = path.join(".data", category);
     if (!existsSync(directory)) mkdirSync(directory, { recursive: true });
-    
+
     return await this.saveToFile(directory, id, JSON.stringify(data));
   }
 
   public async getData<T>(category: string, id: string): Promise<T | null> {
     if (!this.initialized) this.initialize();
-    
+
     const directory = path.join(".data", category);
     return this.readFromFile<T>(directory, id);
   }
 
   public async listData<T>(category: string): Promise<T[]> {
     if (!this.initialized) this.initialize();
-    
+
     try {
       const directory = path.join(".data", category);
       if (!existsSync(directory)) return [];
-      
+
       const files = await fs.readdir(directory);
       const items: T[] = [];
-      
-      for (const file of files.filter(f => f.endsWith(".json"))) {
+
+      for (const file of files.filter((f) => f.endsWith(".json"))) {
         const id = file.replace(`-${NETWORK_ID}.json`, "");
         const data = await this.getData<T>(category, id);
         if (data) items.push(data);
       }
-      
+
       return items;
     } catch (error) {
       console.error(`Error listing data in ${category}:`, error);
@@ -116,7 +133,7 @@ export class FileStorage implements WalletStorage {
 
   public async deleteData(category: string, id: string): Promise<boolean> {
     if (!this.initialized) this.initialize();
-    
+
     try {
       const directory = path.join(".data", category);
       const key = `${id}-${NETWORK_ID}`;
@@ -135,35 +152,35 @@ export class FileStorage implements WalletStorage {
     await this.saveToFile(this.baseDirs.WALLET, userId, walletData);
   }
 
-  public async getWallet(userId: string): Promise<any | null> {
+  public async getWallet(userId: string): Promise<WalletInfo | null> {
     if (!this.initialized) this.initialize();
     return this.readFromFile(this.baseDirs.WALLET, userId);
   }
 
-  public async getWalletByAddress(address: string): Promise<any | null> {
+  public async getWalletByAddress(address: string): Promise<WalletInfo | null> {
     if (!this.initialized) this.initialize();
     try {
       const directory = this.baseDirs.WALLET;
       if (!existsSync(directory)) return null;
-      
+
       const files = await fs.readdir(directory);
-      
-      for (const file of files.filter(f => f.endsWith(".json"))) {
+
+      for (const file of files.filter((f) => f.endsWith(".json"))) {
         try {
           const data = await fs.readFile(path.join(directory, file), "utf-8");
-          const walletData = JSON.parse(data);
-          
+          const walletData = JSON.parse(data) as WalletInfo;
+
           // Check if this wallet has the target address
-          if (walletData.address && 
-              walletData.address.toLowerCase() === address.toLowerCase()) {
+          if (walletData.address.toLowerCase() === address.toLowerCase()) {
             return walletData;
           }
         } catch (err) {
+          console.error(`Error parsing wallet data from ${file}:`, err);
           // Skip files with parsing errors
           continue;
         }
       }
-      
+
       return null;
     } catch (error) {
       console.error(`Error finding wallet by address ${address}:`, error);
@@ -174,7 +191,7 @@ export class FileStorage implements WalletStorage {
   public async getWalletCount(): Promise<number> {
     try {
       const files = await fs.readdir(this.baseDirs.WALLET);
-      return files.filter(file => file.endsWith(".json")).length;
+      return files.filter((file) => file.endsWith(".json")).length;
     } catch (error) {
       console.error("Error getting wallet count:", error);
       return 0;
@@ -184,4 +201,3 @@ export class FileStorage implements WalletStorage {
 
 // Export a single global instance
 export const storage = new FileStorage();
-

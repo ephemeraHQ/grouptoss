@@ -9,16 +9,16 @@ export interface NetworkConfig {
 }
 
 export interface TransactionDetails {
-  status: 'success' | 'failed' | 'pending';
+  status: "success" | "failed" | "pending";
   to: string | null;
   from: string | null;
   data: string | null;
   value: bigint | null;
-  logs?: any[];
+  logs?: unknown[];
   metadata?: {
     selectedOption?: string;
     tossId?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -28,10 +28,9 @@ export interface ERC20TransferData {
   metadata?: {
     selectedOption?: string;
     tossId?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
-
 
 // Interface for parsed JSON response
 export interface TossJsonResponse {
@@ -120,7 +119,7 @@ export type StreamChunk = AgentChunk | ToolsChunk;
 export type MessageHandler = (
   message: DecodedMessage,
   conversation: Conversation,
-  command: string
+  command: string,
 ) => Promise<void>;
 
 // Interface for transfer response
@@ -134,4 +133,3 @@ export interface Transfer {
   transactionHash?: string;
   transactionLink?: string;
 }
-

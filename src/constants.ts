@@ -7,22 +7,22 @@ export const DEFAULT_OPTIONS = ["yes", "no"];
 export const DEFAULT_AMOUNT = "0.1";
 export const MAX_USDC_AMOUNT = 10; // Maximum allowed USDC transaction amount
 export const networks = [
-   {
-     tokenAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
-     chainId: toHex(84532), // Base Sepolia network ID (84532 in hex)
-     decimals: 6,
-     networkName: "Base Sepolia",
-     networkId: "base-sepolia",
-   },
-   {
-     tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base Mainnet
-     chainId: toHex(8453), // Base Mainnet network ID (8453 in hex)
-     decimals: 6,
-     networkName: "Base Mainnet",
-     networkId: "base-mainnet",
-   },
+  {
+    tokenAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
+    chainId: toHex(84532), // Base Sepolia network ID (84532 in hex)
+    decimals: 6,
+    networkName: "Base Sepolia",
+    networkId: "base-sepolia",
+  },
+  {
+    tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base Mainnet
+    chainId: toHex(8453), // Base Mainnet network ID (8453 in hex)
+    decimals: 6,
+    networkName: "Base Mainnet",
+    networkId: "base-mainnet",
+  },
 ];
-export const COMMANDS=`
+export const COMMANDS = `
 Group commands (only work in group chats):
 - @toss join - To show the payment buttons for the toss
 - @toss close <option> - Close the toss and set the winning option (only for toss creator)
@@ -31,7 +31,9 @@ Group commands (only work in group chats):
 - @toss help - Show help message
 `;
 
-const filteredNetworks = networks.filter((network) => network.networkId === NETWORK_ID);
+const filteredNetworks = networks.filter(
+  (network) => network.networkId === NETWORK_ID,
+);
 // Help message for users
 export const HELP_MESSAGE = `🎲 Group Toss Bot Help 🎲
 
@@ -49,7 +51,6 @@ ${COMMANDS}
 
 📝 Note: Toss creation and management only work in group chats. For balance checks, please DM me.
 `;
-
 
 // Agent instructions template
 export const AGENT_INSTRUCTIONS = `
@@ -84,4 +85,4 @@ export const AGENT_INSTRUCTIONS = `
    ${COMMANDS}
   
   Keep responses concise and clear, focusing on payment verification and toss status.
-`; 
+`;
