@@ -11,7 +11,8 @@
     "gen:keys": "tsx scripts/generateKeys.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@coinbase/agentkit": "^0.6.2",
