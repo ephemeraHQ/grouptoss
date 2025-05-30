@@ -23,17 +23,19 @@ export const networks = [
    },
 ];
 export const COMMANDS=`
-Other commands:
+Group commands (only work in group chats):
 - @toss join - To show the payment buttons for the toss
 - @toss close <option> - Close the toss and set the winning option (only for toss creator)
 - @toss refresh - Check for new payments to the toss wallet and refresh status
 - @toss status - Check the status of the current toss
-- @toss help - Show this help message`
-
+- @toss help - Show help message
+`;
 
 const filteredNetworks = networks.filter((network) => network.networkId === NETWORK_ID);
 // Help message for users
-export const HELP_MESSAGE = `To create a toss using natural language: 
+export const HELP_MESSAGE = `🎲 Group Toss Bot Help 🎲
+
+To create a toss using natural language (GROUP CHATS ONLY): 
 
 @toss <natural language toss> 
 
@@ -44,6 +46,8 @@ for example:
 When a toss is created, users can join by clicking on the payment buttons for your preferred option.
 
 ${COMMANDS}
+
+📝 Note: Toss creation and management only work in group chats. For balance checks, please DM me.
 `;
 
 
