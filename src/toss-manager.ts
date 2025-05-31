@@ -16,7 +16,7 @@ import {
   sendTransactionReference,
 } from "../helpers/transactions";
 import type { WalletService } from "../helpers/walletService";
-import type { AgentOptions } from "../helpers/xmtp-handler";
+import type { MessageContext } from "../helpers/xmtp-skills";
 import { HELP_MESSAGE, MAX_USDC_AMOUNT } from "./constants";
 import { parseNaturalLanguageToss } from "./index";
 import {
@@ -868,14 +868,7 @@ export class TossManager {
     client: Client,
     conversation: Conversation,
     message: DecodedMessage,
-    messageContext: {
-      isDm: boolean;
-      options: AgentOptions;
-      hasCommand: boolean;
-      isTransaction: boolean;
-      command: string;
-      commandData: { name: string; args: string[] };
-    },
+    messageContext: MessageContext,
     agent: ReturnType<typeof createReactAgent>,
     agentConfig: AgentConfig,
   ): Promise<string> {

@@ -9,11 +9,8 @@ import {
   WalletService,
   type WalletStorage,
 } from "../helpers/walletService";
-import {
-  initializeClient,
-  type AgentOptions,
-  type MessageContext,
-} from "../helpers/xmtp-handler";
+import { initializeClient, type ClientOptions } from "../helpers/xmtp-handler";
+import type { MessageContext } from "../helpers/xmtp-skills";
 import {
   AGENT_INSTRUCTIONS,
   DEFAULT_AMOUNT,
@@ -175,7 +172,7 @@ async function processMessage(
     const inboxId = message.senderInboxId;
 
     // Handle transaction references
-    if (messageContext.isTransaction) {
+    if (messageContext.type === "transactionReference") {
       await conversation.send("⏳ Fetching transaction details...");
       await tossManager.handleTransactionReference(
         client,
@@ -220,8 +217,9 @@ async function processMessage(
 }
 
 // Initialize client
-const options: AgentOptions = {
+const options: ClientOptions = {
   walletKey: process.env.WALLET_KEY as string,
+  dbEncryptionKey: process.env.ENCRYPTION_KEY as string,  
   acceptGroups: true,
   acceptTypes: ["text", "transactionReference"],
   networks: process.env.XMTP_NETWORKS?.split(",") ?? ["dev"],
